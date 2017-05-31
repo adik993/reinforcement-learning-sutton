@@ -1,5 +1,8 @@
+from multiprocessing import cpu_count
+
 import matplotlib.pyplot as plt
 import numpy as np
+from joblib import Parallel, delayed
 
 
 class ActionSelector:
@@ -17,6 +20,12 @@ class EpsilonGreedyActionSelector(ActionSelector):
         else:
             return np.argmax(estimated_values)
 
+    def __repr__(self):
+        return 'EpsilonGreedyActionSelector({})'.format(self.epsilon)
+
+    def __str__(self):
+        return 'epsilon={}'.format(self.epsilon)
+
 
 class SoftmaxActionSelector(ActionSelector):
     def __init__(self, temperature):
@@ -28,6 +37,12 @@ class SoftmaxActionSelector(ActionSelector):
 
     def softmax(self, x):
         return np.e ** x / sum(np.e ** x)
+
+    def __repr__(self):
+        return 'SoftmaxActionSelector({})'.format(self.temperature)
+
+    def __str__(self):
+        return 'softmax={}'.format(self.temperature)
 
 
 class Bandit:
@@ -49,43 +64,46 @@ class Bandit:
         self.estimated_values[lever] += (new_value - self.estimated_values[lever]) / self.counts[lever]
 
 
-def run_test(bandit, selector, K=1000):
-    history = np.empty((K,))
-    for i in range(K):
-        reward = bandit.pull(selector)
-        history[i] = reward
-    return history
+class TestCase:
+    def __init__(self, levers, selector, name=None):
+        self.levers = levers
+        self.selector = selector
+        self.name = name
+
+    def get_name(self):
+        return str(self.selector)
+
+    def __run_test(self, bandit, selector, K=1000):
+        history = np.empty(K)
+        for i in range(K):
+            reward = bandit.pull(selector)
+            history[i] = reward
+        return history
+
+    def run(self, K, N_AVG):
+        history = np.zeros(K)
+        for _ in range(N_AVG):
+            history += self.__run_test(Bandit(self.levers), self.selector, K)
+        return history / N_AVG
 
 
 if __name__ == '__main__':
     N = 10
     K = 1000
     N_AVG = 500
-    epsilon0_greedy_history = np.zeros(K)
-    epsilon001_greedy_history = np.zeros(K)
-    epsilon01_greedy_history = np.zeros(K)
-    softmax01_history = np.zeros(K)
-    softmax02_history = np.zeros(K)
-    softmax04_history = np.zeros(K)
-    for i in range(500):
-        bandit = Bandit(N)
-        softmax01_history += run_test(bandit, SoftmaxActionSelector(0.1))
-        bandit = Bandit(N)
-        softmax04_history += run_test(bandit, SoftmaxActionSelector(0.2))
-        bandit = Bandit(N)
-        softmax02_history += run_test(bandit, SoftmaxActionSelector(0.4))
-        bandit = Bandit(N)
-        epsilon0_greedy_history += run_test(bandit, EpsilonGreedyActionSelector(0.0))
-        bandit = Bandit(N)
-        epsilon001_greedy_history += run_test(bandit, EpsilonGreedyActionSelector(0.01))
-        bandit = Bandit(N)
-        epsilon01_greedy_history += run_test(bandit, EpsilonGreedyActionSelector(0.1))
 
-    plt.plot(softmax01_history / N_AVG, label='softmax=0.1')
-    plt.plot(softmax02_history / N_AVG, label='softmax=0.2')
-    plt.plot(softmax04_history / N_AVG, label='softmax=0.4')
-    plt.plot(epsilon0_greedy_history / N_AVG, label='epsilon=0.0')
-    plt.plot(epsilon001_greedy_history / N_AVG, label='epsilon=0.01')
-    plt.plot(epsilon01_greedy_history / N_AVG, label='epsilon=0.1')
+    tests = [TestCase(N, EpsilonGreedyActionSelector(0.0)),
+             TestCase(N, EpsilonGreedyActionSelector(0.1)),
+             TestCase(N, EpsilonGreedyActionSelector(0.01)),
+             TestCase(N, SoftmaxActionSelector(0.1)),
+             TestCase(N, SoftmaxActionSelector(0.2)),
+             TestCase(N, SoftmaxActionSelector(0.4))]
+
+    with Parallel(n_jobs=min([cpu_count(), len(tests)])) as parallel:
+        results = parallel(delayed(test_case.run)(K, N_AVG) for test_case in tests)
+
+    for test_case, history in zip(tests, results):
+        plt.plot(history, label=test_case.get_name())
+
     plt.legend()
     plt.show()
