@@ -1,8 +1,5 @@
-from multiprocessing import cpu_count
-
 import matplotlib.pyplot as plt
 import numpy as np
-from joblib import Parallel, delayed
 
 
 class ActionSelector:
@@ -46,34 +43,51 @@ class SoftmaxActionSelector(ActionSelector):
 
 
 class Bandit:
-    def __init__(self, n=10):
-        self.n = n
-        self.values = np.random.randn(self.n)
+    def __init__(self, step_size):
+        self.n = 10
+        self.values = np.zeros(self.n)
         self.estimated_values = np.zeros(self.n)
         self.counts = np.zeros(self.n)
+        self.step_size = step_size
 
     def pull(self, selector: ActionSelector):
         lever = selector.select(self.estimated_values)
-        noise = np.random.randn()
+        noise = np.random.normal(0, 0.3)
         reward = self.values[lever] + noise
         self.incremental_mean(lever, reward)
+        self.random_walk()
         return reward
+
+    def random_walk(self):
+        walk = np.random.normal(0, 0.01, self.values.shape)
+        if np.random.rand() < 0.045:
+            idx = np.argmax(self.values)
+            if walk[idx] > 0:
+                walk[idx] = -walk[idx]
+        self.values += walk
 
     def incremental_mean(self, lever, new_value):
         self.counts[lever] += 1
-        self.estimated_values[lever] += (new_value - self.estimated_values[lever]) / self.counts[lever]
+        if self.step_size is None:
+            step_size = 1 / self.counts[lever]
+        else:
+            step_size = self.step_size
+        self.estimated_values[lever] += step_size * (new_value - self.estimated_values[lever])
 
 
 class TestCase:
-    def __init__(self, levers, selector, name=None):
-        self.levers = levers
+    def __init__(self, step_size, selector, name=None):
+        self.step_size = step_size
         self.selector = selector
         self.name = name
 
     def get_name(self):
-        return str(self.selector)
+        if self.name is None:
+            return str(self.selector)
+        else:
+            return self.name
 
-    def __run_test(self, bandit, selector, K=1000):
+    def __run_test(self, bandit, selector, K):
         history = np.empty(K)
         for i in range(K):
             reward = bandit.pull(selector)
@@ -83,27 +97,19 @@ class TestCase:
     def run(self, K, N_AVG):
         history = np.zeros(K)
         for _ in range(N_AVG):
-            history += self.__run_test(Bandit(self.levers), self.selector, K)
+            history += self.__run_test(Bandit(self.step_size), self.selector, K)
         return history / N_AVG
 
 
 if __name__ == '__main__':
-    N = 10
-    K = 1000
+    K = 10000
     N_AVG = 500
-
-    tests = [TestCase(N, EpsilonGreedyActionSelector(0.0)),
-             TestCase(N, EpsilonGreedyActionSelector(0.1)),
-             TestCase(N, EpsilonGreedyActionSelector(0.01)),
-             TestCase(N, SoftmaxActionSelector(0.1)),
-             TestCase(N, SoftmaxActionSelector(0.2)),
-             TestCase(N, SoftmaxActionSelector(0.4))]
-
-    with Parallel(n_jobs=min([cpu_count(), len(tests)])) as parallel:
-        results = parallel(delayed(test_case.run)(K, N_AVG) for test_case in tests)
-
-    for test_case, history in zip(tests, results):
-        plt.plot(history, label=test_case.get_name())
+    test_case = TestCase(None, EpsilonGreedyActionSelector(0.1), name='mean')
+    history = test_case.run(K, N_AVG)
+    plt.plot(history, label=test_case.get_name())
+    test_case = TestCase(0.1, EpsilonGreedyActionSelector(0.1), name='const')
+    history = test_case.run(K, N_AVG)
+    plt.plot(history, label=test_case.get_name())
 
     plt.legend()
     plt.show()
