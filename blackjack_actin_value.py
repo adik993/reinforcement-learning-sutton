@@ -1,6 +1,4 @@
-import functools
 from collections import defaultdict
-import collections
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
@@ -10,38 +8,6 @@ import logging
 logging.setLogRecordFactory(logging.LogRecord)
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)-15s - %(levelname)-5s - %(message)s')
-
-
-class memoized(object):
-    """Decorator. Caches a function's return value each time it is called.
-    If called later with the same arguments, the cached value is returned
-    (not reevaluated).
-    """
-
-    def __init__(self, func):
-        self.func = func
-        self.cache = {}
-
-    def __call__(self, *args):
-        if not isinstance(args, collections.Hashable):
-            # uncacheable. a list, for instance.
-            # better to not cache than blow up.
-            return self.func(*args)
-        if args in self.cache:
-            return self.cache[args]
-        else:
-            value = self.func(*args)
-            self.cache[args] = value
-            return value
-
-    def __repr__(self):
-        """Return the function's docstring."""
-        return self.func.__doc__
-
-    def __get__(self, obj, objtype):
-        """Support instance methods."""
-        return functools.partial(self.__call__, obj)
-
 
 NO_ACE_LAYER = 0
 ACE_LAYER = 1
@@ -148,26 +114,6 @@ def calculate_hand_sum(cards):
     return hand
 
 
-def _draw_card_sum(all, curr, n):
-    hand = calculate_hand_sum(curr)
-    if n - hand == 0:
-        all.append(curr)
-        return
-    else:
-        values = {card_value(card): card for card in CARDS if card != ACE_CARD}
-        values[decide_ace_value(hand)] = ACE_CARD
-        valid = dict(filter(lambda entry: entry[0] <= n - hand, values.items()))
-        for card in valid.values():
-            _draw_card_sum(all, curr + [card], n)
-
-
-@memoized
-def draw_card_sum(n: int) -> list:
-    all = []
-    _draw_card_sum(all, [], n)
-    return sorted(all, key=len)
-
-
 def draw_card(n=1):
     if n == 1:
         return np.random.choice(CARDS)
@@ -254,8 +200,9 @@ def generate_episode(player_policy, dealer_policy):
     action = np.random.choice(ACTIONS)
     dealer_hidden = draw_card()
     dealer = [draw_card()]
-    n = np.random.randint(PLAYER_MIN, PLAYER_MAX + 1)
-    player = np.random.choice(draw_card_sum(n)).copy()
+    player = list(draw_card(2))
+    while calculate_hand_sum(player) < PLAYER_MIN or calculate_hand_sum(player) > PLAYER_MAX:
+        player = list(draw_card(2))
     state = State(dealer, player, action)
     history.append(state)
     logging.debug('Initial state: {}'.format(state))
