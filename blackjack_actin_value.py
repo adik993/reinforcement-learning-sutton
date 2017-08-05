@@ -1,4 +1,6 @@
+import functools
 from collections import defaultdict
+import collections
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
@@ -8,6 +10,38 @@ import logging
 logging.setLogRecordFactory(logging.LogRecord)
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)-15s - %(levelname)-5s - %(message)s')
+
+
+class memoized(object):
+    """Decorator. Caches a function's return value each time it is called.
+    If called later with the same arguments, the cached value is returned
+    (not reevaluated).
+    """
+
+    def __init__(self, func):
+        self.func = func
+        self.cache = {}
+
+    def __call__(self, *args):
+        if not isinstance(args, collections.Hashable):
+            # uncacheable. a list, for instance.
+            # better to not cache than blow up.
+            return self.func(*args)
+        if args in self.cache:
+            return self.cache[args]
+        else:
+            value = self.func(*args)
+            self.cache[args] = value
+            return value
+
+    def __repr__(self):
+        """Return the function's docstring."""
+        return self.func.__doc__
+
+    def __get__(self, obj, objtype):
+        """Support instance methods."""
+        return functools.partial(self.__call__, obj)
+
 
 NO_ACE_LAYER = 0
 ACE_LAYER = 1
@@ -33,6 +67,7 @@ KING_CARD = 13
 ACTION_STICK = 0
 ACTION_HIT = 1
 ACTIONS = [ACTION_STICK, ACTION_HIT]
+N_ACTIONS = len(ACTIONS)
 
 REWARD_WIN = 1
 REWARD_DRAW = 0
@@ -47,9 +82,10 @@ GAME_STATE_DRAW = 3
 
 
 class State:
-    def __init__(self, dealer, player):
+    def __init__(self, dealer, player, player_action=None):
         self.dealer = list(dealer)
         self.player = list(player)
+        self.player_action = player_action
         self.dealer_sum = calculate_hand_sum(self.dealer)
         self.player_sum = calculate_hand_sum(self.player)
         self.player_has_usable_ace = has_ace_usable(self.player)
@@ -67,10 +103,10 @@ class State:
         return ACE_LAYER if self.player_has_usable_ace else NO_ACE_LAYER
 
     def __str__(self):
-        return 'State(dealer_sum={:2} dealer_cards={} player_sum({})={:2}) player_cards={}'.format(
+        return 'State(dealer_sum={:2} dealer_cards={} player_sum({})={:2}) player_action={} player_cards={}'.format(
             self.dealer_sum, self.dealer,
             'has ace' if self.player_has_usable_ace else 'no  ace',
-            self.player_sum, self.player)
+            self.player_sum, self.player_action, self.player)
 
     def __repr__(self):
         return self.__str__()
@@ -110,6 +146,26 @@ def calculate_hand_sum(cards):
         hand += decide_ace_value(hand)
         aces -= 1
     return hand
+
+
+def _draw_card_sum(all, curr, n):
+    hand = calculate_hand_sum(curr)
+    if n - hand == 0:
+        all.append(curr)
+        return
+    else:
+        values = {card_value(card): card for card in CARDS if card != ACE_CARD}
+        values[decide_ace_value(hand)] = ACE_CARD
+        valid = dict(filter(lambda entry: entry[0] <= n - hand, values.items()))
+        for card in valid.values():
+            _draw_card_sum(all, curr + [card], n)
+
+
+@memoized
+def draw_card_sum(n: int) -> list:
+    all = []
+    _draw_card_sum(all, [], n)
+    return sorted(all, key=len)
 
 
 def draw_card(n=1):
@@ -193,19 +249,21 @@ def log_card(who, card):
 def generate_episode(player_policy, dealer_policy):
     logging.debug('Generating episodes')
     history = []
+
+    # Exploring starts
+    action = np.random.choice(ACTIONS)
     dealer_hidden = draw_card()
     dealer = [draw_card()]
-    player = list(draw_card(2))
-    state = State(dealer, player)
-    if should_remember(state):
-        history.append(state)
+    n = np.random.randint(PLAYER_MIN, PLAYER_MAX + 1)
+    player = np.random.choice(draw_card_sum(n)).copy()
+    state = State(dealer, player, action)
+    history.append(state)
     logging.debug('Initial state: {}'.format(state))
     if calculate_hand_sum(player) >= BLACKJACK:
         logging.debug('Player has blackjack from initial hand: {}'.format(state))
 
     # Player plays seeing only one dealers card
     logging.debug('Player let\'s play')
-    action = ACTION_HIT
     while state.player_sum < BLACKJACK and action == ACTION_HIT:
         # Below PLAYER_MIN its boring above start using policy
         action = ACTION_HIT if state.player_sum < PLAYER_MIN else player_policy[state.to_key()]
@@ -213,10 +271,10 @@ def generate_episode(player_policy, dealer_policy):
             card = draw_card()
             log_card('Player', card)
             player.append(card)
-            state = State(dealer, player)
+            state = State(dealer, player, action)
             # If things got interesting start remembering states
             if should_remember(state):
-                history.append(State(dealer, player))
+                history.append(state)
 
     # Remove bust state
     busted = is_player_busted(history[-1])
