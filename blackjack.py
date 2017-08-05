@@ -1,18 +1,24 @@
+from collections import defaultdict
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
 import numpy as np
 import logging
 
 logging.setLogRecordFactory(logging.LogRecord)
-logging.basicConfig(level=logging.DEBUG,
+logging.basicConfig(level=logging.INFO,
                     format='%(asctime)-15s - %(levelname)-5s - %(message)s')
 
 NO_ACE_LAYER = 0
 ACE_LAYER = 1
 N_USABLE_ACE_LAYERS = 2
 
+DEALER_SICK_SUM = 17
 DEALER_MIN = 1  # ACE is 1 or 10
 DEALER_MAX = 10  # Max in one card
 N_DEALER_CARD_SUM_POSSIBILITIES = DEALER_MAX - DEALER_MIN + 1
 
+PLAYER_INIT_STICK_SUM = 20
 PLAYER_MIN = 12  # Below 12 always hit
 PLAYER_MAX = 21  # Blackjack :)
 N_PLAYER_CARDS_SUM_POSSIBILITIES = PLAYER_MAX - PLAYER_MIN + 1
@@ -49,10 +55,13 @@ class State:
         self.player_has_usable_ace = has_ace_usable(self.player)
 
     def get_policy_player_sum(self):
-        return self.player_sum - PLAYER_MIN - 1
+        return self.player_sum - PLAYER_MIN
 
     def get_policy_dealer_sum(self):
-        return self.dealer_sum - DEALER_MIN - 1
+        if self.dealer[0] == ACE_CARD:
+            return DEALER_MIN - 1
+        else:
+            return self.dealer_sum - DEALER_MIN
 
     def get_policy_has_usable_ace(self):
         return ACE_LAYER if self.player_has_usable_ace else NO_ACE_LAYER
@@ -65,6 +74,10 @@ class State:
 
     def __repr__(self):
         return self.__str__()
+
+    def to_key(self):
+        ace_layer = ACE_LAYER if self.player_has_usable_ace else NO_ACE_LAYER
+        return self.get_policy_dealer_sum(), self.get_policy_player_sum(), ace_layer
 
 
 def card_value(card):
@@ -125,16 +138,23 @@ def has_blackjack(card_sum):
     return card_sum == BLACKJACK
 
 
+def has_natural(cards, card_sum):
+    return len(cards) == 2 and has_blackjack(card_sum)
+
+
 def determine_game_state(state):
-    dealer = state.dealer_sum
-    player = state.player_sum
-    if player > BLACKJACK:
+    dealer_sum = state.dealer_sum
+    player_sum = state.player_sum
+    if player_sum > BLACKJACK:
         return GAME_STATE_LOSE
-    elif dealer > BLACKJACK:
+    elif dealer_sum > BLACKJACK:
         return GAME_STATE_WIN
-    elif dealer == player:
-        return GAME_STATE_DRAW
-    elif player > dealer:
+    elif dealer_sum == player_sum:
+        if has_natural(state.player, player_sum) and not has_natural(state.dealer, dealer_sum):
+            return GAME_STATE_WIN
+        else:
+            return GAME_STATE_DRAW
+    elif player_sum > dealer_sum:
         return GAME_STATE_WIN
     else:
         return GAME_STATE_LOSE
@@ -158,6 +178,10 @@ def is_player_busted(state):
         return False
 
 
+def should_remember(state):
+    return state.player_sum >= PLAYER_MIN
+
+
 def log_card(who, card):
     value = card_value(card)
     if card == ACE_CARD:
@@ -173,7 +197,8 @@ def generate_episode(player_policy, dealer_policy):
     dealer = [draw_card()]
     player = list(draw_card(2))
     state = State(dealer, player)
-    history.append(state)
+    if should_remember(state):
+        history.append(state)
     logging.debug('Initial state: {}'.format(state))
     if calculate_hand_sum(player) >= BLACKJACK:
         logging.debug('Player has blackjack from initial hand: {}'.format(state))
@@ -183,15 +208,14 @@ def generate_episode(player_policy, dealer_policy):
     action = ACTION_HIT
     while state.player_sum < BLACKJACK and action == ACTION_HIT:
         # Below PLAYER_MIN its boring above start using policy
-        action = ACTION_HIT if state.player_sum < PLAYER_MIN else player_policy[
-            state.get_policy_dealer_sum(), state.get_policy_player_sum(), int(state.get_policy_has_usable_ace())]
+        action = ACTION_HIT if state.player_sum < PLAYER_MIN else player_policy[state.to_key()]
         if action == ACTION_HIT:
             card = draw_card()
             log_card('Player', card)
             player.append(card)
             state = State(dealer, player)
             # If things got interesting start remembering states
-            if state.player_sum >= PLAYER_MIN:
+            if should_remember(state):
                 history.append(State(dealer, player))
 
     # Remove bust state
@@ -222,8 +246,37 @@ def generate_episode(player_policy, dealer_policy):
 
 
 if __name__ == '__main__':
-    action_value = np.zeros((N_DEALER_CARD_SUM_POSSIBILITIES, N_PLAYER_CARDS_SUM_POSSIBILITIES, N_USABLE_ACE_LAYERS))
-    player_policy = np.ones(action_value.shape)
-    dealer_policy = np.ones((BLACKJACK,))
-    for i in range(100):
-        logging.info('Episode: {}'.format(generate_episode(player_policy, dealer_policy)))
+    state_value = np.zeros((N_DEALER_CARD_SUM_POSSIBILITIES, N_PLAYER_CARDS_SUM_POSSIBILITIES, N_USABLE_ACE_LAYERS))
+    player_policy = np.ones(state_value.shape)
+    player_policy[:, (PLAYER_INIT_STICK_SUM - PLAYER_MIN):, :] = 0
+    dealer_policy = np.ones((BLACKJACK + 1,))  # Quick solution assume dealer can have sums 0 up to 21 so 22 states
+    dealer_policy[DEALER_SICK_SUM:] = 0  # Stick at DEALER_SICK_SUM or more
+    returns = defaultdict(list)
+    for i in range(500000):
+        episode, reward = generate_episode(player_policy, dealer_policy)
+        logging.info('Episode no {} rewarded {:2}: {}'.format(i, reward, episode))
+        for state in episode:
+            key = state.to_key()
+            returns[key].append(reward)
+            state_value[key] = np.mean(returns[key])
+
+    X, Y = np.meshgrid(np.arange(0, state_value.shape[0]) + DEALER_MIN, np.arange(0, state_value.shape[1]) + PLAYER_MIN)
+    fig = plt.figure()
+    ax = fig.add_subplot(121, projection='3d')
+    ax.set_title('No usable ace')
+    ax.set_xlabel('dealer sum')
+    ax.set_ylabel('player sum')
+    ax.set_xticks(np.arange(0, state_value.shape[0]) + DEALER_MIN)
+    ax.set_yticks(np.arange(0, state_value.shape[1]) + PLAYER_MIN)
+    surf = ax.plot_surface(X, Y, state_value[:, :, NO_ACE_LAYER].T, cmap='jet')
+    fig.colorbar(surf)
+
+    ax = fig.add_subplot(122, projection='3d')
+    ax.set_title('Usable ace')
+    ax.set_xlabel('dealer sum')
+    ax.set_ylabel('player sum')
+    ax.set_xticks(np.arange(0, state_value.shape[0]) + DEALER_MIN)
+    ax.set_yticks(np.arange(0, state_value.shape[1]) + PLAYER_MIN)
+    surf = ax.plot_surface(X, Y, state_value[:, :, ACE_LAYER].T, cmap='jet')
+    fig.colorbar(surf)
+    plt.show()
