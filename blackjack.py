@@ -1,4 +1,9 @@
 import numpy as np
+import logging
+
+logging.setLogRecordFactory(logging.LogRecord)
+logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)-15s - %(levelname)-5s - %(message)s')
 
 NO_ACE_LAYER = 0
 ACE_LAYER = 1
@@ -53,10 +58,10 @@ class State:
         return ACE_LAYER if self.player_has_usable_ace else NO_ACE_LAYER
 
     def __str__(self):
-        return 'dealer_sum={:2} player_sum({})={:2}'.format(
-            self.dealer_sum,
+        return 'State(dealer_sum={:2} dealer_cards={} player_sum({})={:2}) player_cards={}'.format(
+            self.dealer_sum, self.dealer,
             'has ace' if self.player_has_usable_ace else 'no  ace',
-            self.player_sum)
+            self.player_sum, self.player)
 
     def __repr__(self):
         return self.__str__()
@@ -153,44 +158,67 @@ def is_player_busted(state):
         return False
 
 
+def log_card(who, card):
+    value = card_value(card)
+    if card == ACE_CARD:
+        logging.debug('{} drawn: {:2} of value {}'.format(who, card, value))
+    else:
+        logging.debug('{} drawn: {:2} of value {:2}'.format(who, card, value))
+
+
 def generate_episode(player_policy, dealer_policy):
+    logging.debug('Generating episodes')
     history = []
     dealer_hidden = draw_card()
     dealer = [draw_card()]
     player = list(draw_card(2))
     state = State(dealer, player)
+    history.append(state)
+    logging.debug('Initial state: {}'.format(state))
     if calculate_hand_sum(player) >= BLACKJACK:
-        history.append(state)
+        logging.debug('Player has blackjack from initial hand: {}'.format(state))
 
     # Player plays seeing only one dealers card
+    logging.debug('Player let\'s play')
     action = ACTION_HIT
     while state.player_sum < BLACKJACK and action == ACTION_HIT:
         # Below PLAYER_MIN its boring above start using policy
         action = ACTION_HIT if state.player_sum < PLAYER_MIN else player_policy[
             state.get_policy_dealer_sum(), state.get_policy_player_sum(), int(state.get_policy_has_usable_ace())]
         if action == ACTION_HIT:
-            player.append(draw_card())
+            card = draw_card()
+            log_card('Player', card)
+            player.append(card)
             state = State(dealer, player)
             # If things got interesting start remembering states
             if state.player_sum >= PLAYER_MIN:
                 history.append(State(dealer, player))
 
     # Remove bust state
-    if is_player_busted(history[-1]) and len(history) > 1:
+    busted = is_player_busted(history[-1])
+    if busted: logging.debug('Player busted: {}'.format(history[-1]))
+    if busted and len(history) > 1:
+        logging.debug('Remove bust state: {}'.format(history[-1]))
         history = history[:-1]
 
     # Dealer shows a card and plays, it doest append history, but is needed to determine win or loss
     dealer.append(dealer_hidden)
     state = State(dealer, player)
+    logging.debug('Dealer showed card: {}'.format(state))
+    logging.debug('Dealer let\'s play')
     action = ACTION_HIT
     while state.dealer_sum < BLACKJACK and action == ACTION_HIT:
         action = dealer_policy[state.dealer_sum]
         if action == ACTION_HIT:
-            dealer.append(draw_card())
+            card = draw_card()
+            log_card('Dealer', card)
+            dealer.append(card)
             state = State(dealer, player)
 
     game_state = determine_game_state(state)
-    return history, get_reward(game_state)
+    reward = get_reward(game_state)
+    logging.debug('Game reward is {} for final state {}'.format(reward, state))
+    return history, reward
 
 
 if __name__ == '__main__':
@@ -198,4 +226,4 @@ if __name__ == '__main__':
     player_policy = np.ones(action_value.shape)
     dealer_policy = np.ones((BLACKJACK,))
     for i in range(100):
-        print(generate_episode(player_policy, dealer_policy))
+        logging.info('Episode: {}'.format(generate_episode(player_policy, dealer_policy)))
