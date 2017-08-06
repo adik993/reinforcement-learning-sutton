@@ -51,7 +51,7 @@ class State:
     def __init__(self, dealer, player, player_action=None):
         self.dealer = list(dealer)
         self.player = list(player)
-        self.player_action = player_action
+        self.player_action = int(player_action) if player_action is not None else None
         self.dealer_sum = calculate_hand_sum(self.dealer)
         self.player_sum = calculate_hand_sum(self.player)
         self.player_has_usable_ace = has_ace_usable(self.player)
@@ -77,9 +77,12 @@ class State:
     def __repr__(self):
         return self.__str__()
 
-    def to_key(self):
+    def to_policy_key(self):
         ace_layer = ACE_LAYER if self.player_has_usable_ace else NO_ACE_LAYER
         return self.get_policy_dealer_sum(), self.get_policy_player_sum(), ace_layer
+
+    def to_state_action_key(self):
+        return (*self.to_policy_key(), self.player_action)
 
 
 def card_value(card):
@@ -208,20 +211,24 @@ def generate_episode(player_policy, dealer_policy):
     logging.debug('Initial state: {}'.format(state))
     if calculate_hand_sum(player) >= BLACKJACK:
         logging.debug('Player has blackjack from initial hand: {}'.format(state))
+        if action == ACTION_HIT:
+            state = player_hit(action, dealer, history, player)
+            # Corner case when we had ace and we get 10 value card so old ace counts as 1
+            # and we still have blackjack, but action should be now populated from policy
+            if not is_player_busted(state):
+                action = player_policy[state.to_policy_key()]
+                state.player_action = action
 
     # Player plays seeing only one dealers card
     logging.debug('Player let\'s play')
     while state.player_sum < BLACKJACK and action == ACTION_HIT:
-        # Below PLAYER_MIN its boring above start using policy
-        action = ACTION_HIT if state.player_sum < PLAYER_MIN else player_policy[state.to_key()]
         if action == ACTION_HIT:
-            card = draw_card()
-            log_card('Player', card)
-            player.append(card)
-            state = State(dealer, player, action)
-            # If things got interesting start remembering states
-            if should_remember(state):
-                history.append(state)
+            state = player_hit(action, dealer, history, player)
+        # Sutton: the expected return when starting in state s, taking action a, and thereafter following policy Pi
+        # So action should be populated given current state
+        if not is_player_busted(state):
+            action = player_policy[state.to_policy_key()]
+            state.player_action = action
 
     # Remove bust state
     busted = is_player_busted(history[-1])
@@ -250,38 +257,83 @@ def generate_episode(player_policy, dealer_policy):
     return history, reward
 
 
+def player_hit(action, dealer, history, player):
+    card = draw_card()
+    log_card('Player', card)
+    player.append(card)
+    state = State(dealer, player, action)
+    # If things got interesting start remembering states
+    if should_remember(state):
+        history.append(state)
+    return state
+
+
+def policy_improvement(episodes, player_policy, action_values):
+    new_policy = player_policy.copy()
+    for state in episodes:
+        i = np.argmax([action_values[(*state.to_policy_key(), action)] for action in ACTIONS]).flatten()[0]
+        new_policy[state.to_policy_key()] = ACTIONS[i]
+    return new_policy
+
+
+def to_state_value(action_values, player_policy):
+    values = np.zeros(player_policy.shape)
+    for index, value in np.ndenumerate(player_policy):
+        values[index] = action_values[(*index, value)]
+    return values
+
+
 if __name__ == '__main__':
-    state_value = np.zeros((N_DEALER_CARD_SUM_POSSIBILITIES, N_PLAYER_CARDS_SUM_POSSIBILITIES, N_USABLE_ACE_LAYERS))
-    player_policy = np.ones(state_value.shape)
+    action_values = np.zeros(
+        (N_DEALER_CARD_SUM_POSSIBILITIES, N_PLAYER_CARDS_SUM_POSSIBILITIES, N_USABLE_ACE_LAYERS, N_ACTIONS))
+    player_policy = np.ones(action_values.shape[:-1], dtype=np.int32)
     player_policy[:, (PLAYER_INIT_STICK_SUM - PLAYER_MIN):, :] = 0
     dealer_policy = np.ones((BLACKJACK + 1,))  # Quick solution assume dealer can have sums 0 up to 21 so 22 states
     dealer_policy[DEALER_SICK_SUM:] = 0  # Stick at DEALER_SICK_SUM or more
     returns = defaultdict(list)
-    for i in range(500000):
+    for i in range(1000000):
         episode, reward = generate_episode(player_policy, dealer_policy)
         logging.info('Episode no {} rewarded {:2}: {}'.format(i, reward, episode))
         for state in episode:
-            key = state.to_key()
+            key = state.to_state_action_key()
             returns[key].append(reward)
-            state_value[key] = np.mean(returns[key])
+            action_values[key] = np.mean(returns[key])
 
-    X, Y = np.meshgrid(np.arange(0, state_value.shape[0]) + DEALER_MIN, np.arange(0, state_value.shape[1]) + PLAYER_MIN)
+        new_policy = policy_improvement(episode, player_policy, action_values)
+        logging.info('Changes made to policy: {}'.format((new_policy != player_policy).sum()))
+        player_policy = new_policy
+
+    state_values = to_state_value(action_values, player_policy)
+    X, Y = np.meshgrid(np.arange(0, state_values.shape[0]) + DEALER_MIN,
+                       np.arange(0, state_values.shape[1]) + PLAYER_MIN)
     fig = plt.figure()
-    ax = fig.add_subplot(121, projection='3d')
+    ax = fig.add_subplot(221, projection='3d')
     ax.set_title('No usable ace')
     ax.set_xlabel('dealer sum')
     ax.set_ylabel('player sum')
-    ax.set_xticks(np.arange(0, state_value.shape[0]) + DEALER_MIN)
-    ax.set_yticks(np.arange(0, state_value.shape[1]) + PLAYER_MIN)
-    surf = ax.plot_surface(X, Y, state_value[:, :, NO_ACE_LAYER].T, cmap='jet')
+    ax.set_xticks(np.arange(0, state_values.shape[0]) + DEALER_MIN)
+    ax.set_yticks(np.arange(0, state_values.shape[1]) + PLAYER_MIN)
+    surf = ax.plot_surface(X, Y, state_values[:, :, NO_ACE_LAYER].T, cmap='jet')
     fig.colorbar(surf)
 
-    ax = fig.add_subplot(122, projection='3d')
+    ax = fig.add_subplot(222, projection='3d')
     ax.set_title('Usable ace')
     ax.set_xlabel('dealer sum')
     ax.set_ylabel('player sum')
-    ax.set_xticks(np.arange(0, state_value.shape[0]) + DEALER_MIN)
-    ax.set_yticks(np.arange(0, state_value.shape[1]) + PLAYER_MIN)
-    surf = ax.plot_surface(X, Y, state_value[:, :, ACE_LAYER].T, cmap='jet')
+    ax.set_xticks(np.arange(0, state_values.shape[0]) + DEALER_MIN)
+    ax.set_yticks(np.arange(0, state_values.shape[1]) + PLAYER_MIN)
+    surf = ax.plot_surface(X, Y, state_values[:, :, ACE_LAYER].T, cmap='jet')
     fig.colorbar(surf)
+
+    ax = fig.add_subplot(223)
+    ax.set_title('No usable ace')
+    ax.set_xlabel('dealer sum')
+    ax.set_ylabel('player sum')
+    surf = ax.matshow(np.flip(player_policy[:, :, NO_ACE_LAYER].T, 1))
+
+    ax = fig.add_subplot(224)
+    ax.set_title('Usable ace')
+    ax.set_xlabel('dealer sum')
+    ax.set_ylabel('player sum')
+    surf = ax.matshow(np.flip(player_policy[:, :, ACE_LAYER].T, 1))
     plt.show()
