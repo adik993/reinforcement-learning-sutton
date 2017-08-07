@@ -1,6 +1,7 @@
 from gym import Env
 import numpy as np
 from gym.spaces.discrete import Discrete
+from gym.spaces.tuple_space import Tuple
 
 ACE_CARD = 1
 ACE_VALUE = 11
@@ -26,6 +27,7 @@ class Blackjack(Env):
         # ACE, 2, 3, 4, 5, 6, 7, 8, 9, 10, Jack, Queen, King
         self.deck = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10])
         self.action_space = Discrete(N_ACTIONS)
+        self.observation_space = Tuple((Discrete(11), Discrete(32), Discrete(2)))
         self.reward_range = (-1, 1)
         self.dealer_stop = DEALER_SICK_SUM
 
