@@ -6,6 +6,7 @@ import plotly.tools as tools
 
 TRUE_VALUES = np.array([0, 1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6, 1])
 ALPHA = 0.1
+ERROR = 1e-2
 
 
 class State:
@@ -74,6 +75,26 @@ def perform_alpha_sim(alphas: dict, algorithm, n_states: int, episodes=100, n_av
         alphas[alpha] = curr / n_average
 
 
+def perform_rmse_sim(n, n_avg=100):
+    mc_rmse_hist = np.zeros((n + 1,))
+    td0_rmse_hist = np.zeros((n + 1,))
+    for i in range(n_avg):
+        print('Run no. {}'.format(i))
+        all_episodes = []
+        mc_value = get_initial_value(n_states)
+        td0_value = get_initial_value(n_states)
+        mc_rmse_hist[0] += rmse(mc_value[1:-1], TRUE_VALUES[1:-1])
+        td0_rmse_hist[0] += rmse(td0_value[1:-1], TRUE_VALUES[1:-1])
+        for j in range(n):
+            all_episodes.append(generate_episode(env))
+            for episode in all_episodes:
+                mc_value = monte_carlo(mc_value, episode, alpha=0.01)
+                td0_value = td0(td0_value, episode, alpha=0.01)
+            mc_rmse_hist[j + 1] += rmse(mc_value[1:-1], TRUE_VALUES[1:-1])
+            td0_rmse_hist[j + 1] += rmse(td0_value[1:-1], TRUE_VALUES[1:-1])
+    return mc_rmse_hist / n_avg, td0_rmse_hist / n_avg
+
+
 if __name__ == '__main__':
     env = RandomWalk()
     n_states = env.observation_space.n
@@ -139,3 +160,9 @@ if __name__ == '__main__':
     fig['layout']['yaxis3']['title'] = 'RMSE averaged over states'
     fig['layout']['yaxis4']['title'] = 'RMSE averaged over states'
     py.plot(fig)
+
+    mc_rmse_hist, td0_rmse_hist = perform_rmse_sim(100)
+
+    data = [go.Scatter(y=mc_rmse_hist, name='MC'),
+            go.Scatter(y=td0_rmse_hist, name='TD(0)')]
+    py.plot(data)
