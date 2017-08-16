@@ -64,12 +64,14 @@ if __name__ == '__main__':
     player_policy = np.ones(action_values.shape[:-1], dtype=np.int32)
     player_policy[:, (PLAYER_INIT_STICK_SUM - PLAYER_MIN):, :] = 0
     returns = defaultdict(list)
-    for i in range(500000):
-        episode, reward = generate_episode(env, player_policy, i)
-        log.info('Episode no {} rewarded {:2}: {}'.format(i, reward, episode))
-        for state in episode:
+    for ep in range(500000):
+        episode, reward = generate_episode(env, player_policy, ep)
+        log.info('Episode no {} rewarded {:2}: {}'.format(ep, reward, episode))
+        for i, state in enumerate(episode):
             key = state.to_state_action_key()
-            returns[key].append(reward)
+            tmp = [0.0] * (len(episode) - i)
+            tmp[-1] = reward
+            returns[key].append(np.mean(tmp))
             action_values[key] = np.mean(returns[key])
 
         new_policy = policy_improvement(episode, player_policy, action_values)
