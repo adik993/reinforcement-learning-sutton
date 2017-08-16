@@ -10,7 +10,7 @@ from log import make_logger
 
 log = make_logger(__name__)
 
-EPSILON = 0.5
+EPSILON = 0.1
 
 
 class State:
@@ -46,23 +46,27 @@ def generate_episode(env, policy, start=None):
         obs = env._observations()
     while not done:
         prev_obs = obs
-        action = policy[prev_obs]
+        action = get_action(policy, prev_obs)
         obs, reward, done, aux = env.step(action)
         history.append(State(*prev_obs, action, reward))
     return history
 
 
+def get_action(policy, obs):
+    vel = obs[2:]
+    greedy = policy[obs]
+    if np.random.rand() < EPSILON:
+        random = [action for action in RaceDiscrete.legal_actions(vel) if action != greedy]
+        return np.random.choice(random)
+    else:
+        return greedy
+
 def policy_improvement(policy, action_values: np.ndarray, history):
     new_policy = policy.copy()
     for state in history:
         key = state.to_policy_key()
-        vel = (state.vel_u, state.vel_r)
         greedy = np.argwhere(action_values[key] == np.nanmax(action_values[key])).flatten()[0]
-        if np.random.rand() < EPSILON:
-            random = [action for action in RaceDiscrete.legal_actions(vel) if action != greedy]
-            new_policy[key] = np.random.choice(random)
-        else:
-            new_policy[key] = greedy
+        new_policy[key] = greedy
     return new_policy
 
 
@@ -73,18 +77,8 @@ def make_trace(road, history):
     return road
 
 
-def to_policy(action_values: np.ndarray):
-    policy = create_initial_policy()
-    for axis0, axis1, vel_u, vel_r in np.ndindex(action_values.shape[:-1]):
-        key = (axis0, axis1, vel_u, vel_r)
-        greedy = np.argwhere(action_values[key] == np.nanmax(action_values[key])).flatten()[0]
-        policy[key] = greedy
-    return policy
-
-
 def create_initial_policy():
     policy = np.full([space.n for space in env.observation_space.spaces], ACTIONS.index((0, 0)), np.int32)
-    # policy[5, :, :, :] = ACTIONS.index((0, 1))
     return policy
 
 
@@ -112,7 +106,6 @@ if __name__ == '__main__':
             returns[key] += (new - returns[key]) / counts[key]
             action_values[key] = np.mean(returns[key])
         policy = policy_improvement(policy, action_values, history)
-    policy = to_policy(action_values)
 
     starts = env.get_starts()
     cols = 4
