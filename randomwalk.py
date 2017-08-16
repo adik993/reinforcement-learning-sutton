@@ -39,7 +39,7 @@ def generate_episode(env: RandomWalk):
 def monte_carlo(value, history, alpha=ALPHA):
     value = value.copy()
     for i, state in enumerate(history):
-        ret = np.mean([state.reward for state in history[i:]])
+        ret = np.sum([state.reward for state in history[i:]])
         value[state.position] += alpha * (ret - value[state.position])
     return value
 
@@ -87,7 +87,7 @@ if __name__ == '__main__':
         mc_value_checkpoints[0] = mc_value.copy()
     for ep in range(100):
         history = generate_episode(env)
-        mc_value = monte_carlo(mc_value, history)
+        mc_value = monte_carlo(mc_value, history, alpha=0.01)
         td0_value = td0(td0_value, history)
         if ep + 1 in checkpoints:
             td_value_checkpoints[ep + 1] = td0_value.copy()
