@@ -1,3 +1,5 @@
+from gym import Env
+
 from envs.WindyGridWorldEnv import WindyGridWorld
 from log import make_logger
 import numpy as np
@@ -6,7 +8,7 @@ log = make_logger(__name__)
 
 
 class Sarsa:
-    def __init__(self, env: WindyGridWorld, alpha=0.01, gamma=1, epsilon=0.1):
+    def __init__(self, env: Env, alpha=0.5, gamma=1, epsilon=0.1):
         self.alpha = alpha
         self.gamma = gamma
         self.epsilon = epsilon
@@ -14,11 +16,11 @@ class Sarsa:
         self.action_value = np.zeros(obs_space + [env.action_space.n])
         self.actions = np.arange(env.action_space.n)
 
-    def greedy(self, state):
+    def greedy_action(self, state):
         return self.action_value[state].argmax()
 
     def action(self, state):
-        greedy = self.greedy(state)
+        greedy = self.greedy_action(state)
         if np.random.rand() < self.epsilon:
             return np.random.choice([action for action in self.actions if action != greedy])
         else:
@@ -27,13 +29,13 @@ class Sarsa:
     def on_new_state(self, prev_state, action, reward, next_state, done):
         if done:
             return
-        next_action = self.greedy(next_state)
+        next_action = self.action(next_state)
         q = self.action_value[prev_state][action]
         next_q = self.action_value[next_state][next_action]
         self.action_value[prev_state][action] += self.alpha * (reward + self.gamma * next_q - q)
 
 
-def generate_episode(env: WindyGridWorld, algorithm: Sarsa, render=False):
+def generate_episode(env: Env, algorithm: Sarsa, render=False):
     done = False
     obs = env.reset()
     count = 0
@@ -49,7 +51,7 @@ def generate_episode(env: WindyGridWorld, algorithm: Sarsa, render=False):
 
 
 if __name__ == '__main__':
-    env = WindyGridWorld(king_moves=True)
+    env = WindyGridWorld()
     sarsa = Sarsa(env)
     for ep in range(int(1e4)):
         moves = generate_episode(env, sarsa)
