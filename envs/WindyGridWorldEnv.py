@@ -22,11 +22,13 @@ class WindyGridWorld(Env):
     ACTION_UP_RIGHT = 5
     ACTION_DOWN_LEFT = 6
     ACTION_DOWN_RIGHT = 7
+    ACTION_NO_MOVE = 8
 
-    def __init__(self, king_moves=False, stochastic_wind=False):
+    def __init__(self, king_moves=False, no_move=False, stochastic_wind=False):
         self.king_moves = king_moves
+        self.no_move = no_move
         self.stochastic_wind = stochastic_wind
-        self.action_space = Discrete(8 if self.king_moves else 4)
+        self.action_space = Discrete(8 + self.no_move if self.king_moves else 4)
         self._reset()
         self.observation_space = Tuple((Discrete(self.size[0]), Discrete(self.size[1])))
 
@@ -62,19 +64,21 @@ class WindyGridWorld(Env):
             self._move((1, -1))
         elif self.king_moves and action == WindyGridWorld.ACTION_DOWN_RIGHT:
             self._move((1, 1))
+        elif self.no_move and action == WindyGridWorld.ACTION_NO_MOVE:
+            self._move((0, 0))
         done = self.position == self.stop
         return self._observation(), -1, done, self.wind
 
     def _move(self, by):
+        wind = self._get_wind(self.position[1])
         axis1 = minmax(self.position[1] + by[1], 0, self.size[1] - 1)
-        axis0 = self.position[0] + by[0]
-        axis0 = self._apply_wind(axis0, axis1)
+        axis0 = self.position[0] + by[0] - wind
         axis0 = minmax(axis0, 0, self.size[0] - 1)
         self.position = axis0, axis1
 
-    def _apply_wind(self, axis0, axis1):
+    def _get_wind(self, axis1):
         additional_wind = np.random.choice([-1, 0, 1]) if self.stochastic_wind and self.wind[axis1] else 0
-        return axis0 - self.wind[axis1] + additional_wind
+        return self.wind[axis1] + additional_wind
 
     def _observation(self):
         return self.position
@@ -85,6 +89,7 @@ class WindyGridWorld(Env):
         self.stop = (3, 7)
         self.position = self.start
         self.wind = np.array([0, 0, 0, 1, 1, 1, 2, 2, 1, 0])
+        return self._observation()
 
 
 if __name__ == '__main__':
