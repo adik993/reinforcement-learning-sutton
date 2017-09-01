@@ -8,8 +8,8 @@ class RandomWalk(Env):
     ACTION_LEFT = 0
     ACTION_RIGHT = 1
 
-    def __init__(self):
-        self.states = np.array([0, 0, 0, 0, 0, 0, 1])
+    def __init__(self, left_reward=0):
+        self.states = np.array([left_reward, 0, 0, 0, 0, 0, 1])
         self.action_space = Discrete(2)
         self.observation_space = Discrete(7)
         self._reset()
