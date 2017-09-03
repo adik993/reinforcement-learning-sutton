@@ -12,7 +12,60 @@ def randomargmax(d, key=None):
     return np.random.choice([k for k, v in d.items() if d[k_max] == v])
 
 
-class DoubleQLearning:
+def epsilon_prob(greedy, action, n_actions, epsilon):
+    if greedy == action:
+        return epsilon_greedy_prob(n_actions, epsilon)
+    else:
+        return epsilon_explore_prob(n_actions, epsilon)
+
+
+def epsilon_greedy_prob(n_actions, epsilon):
+    return 1 - epsilon + epsilon / n_actions
+
+
+def epsilon_explore_prob(n_actions, epsilon):
+    return epsilon / n_actions
+
+
+class Algorithm:
+    def action(self, state):
+        raise NotImplementedError()
+
+    def on_new_state(self, state, action, reward, next_state, done):
+        raise NotImplementedError()
+
+
+class QLearning(Algorithm):
+    def __init__(self, env, alpha=0.1, gamma=1, epsilon=0.1):
+        self.alpha = alpha
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.q = defaultdict(dict)
+        for state in range(env.observation_space.n):
+            actions = env.available_actions(state)
+            for action in actions:
+                self.q[state][action] = .0
+
+    def action(self, state):
+        greedy = self.greedy_action(state)
+        actions = list(self.q[state].keys())
+        probs = [epsilon_prob(greedy, action, len(actions), self.epsilon) for action in actions]
+        return np.random.choice(actions, p=probs)
+
+    def greedy_action(self, state):
+        tmp = self.q[state]
+        return randomargmax(tmp, key=tmp.get)
+
+    def greedy_value(self, state):
+        return self.q[state][self.greedy_action(state)]
+
+    def on_new_state(self, state, action, reward, next_state, done):
+        greedy_value = self.greedy_value(next_state) if not done else 0
+        delta = self.gamma * greedy_value - self.q[state][action]
+        self.q[state][action] += self.alpha * (reward + delta)
+
+
+class DoubleQLearning(Algorithm):
     def __init__(self, env, alpha=0.1, gamma=1, epsilon=0.1):
         self.alpha = alpha
         self.gamma = gamma
@@ -28,8 +81,7 @@ class DoubleQLearning:
     def action(self, state):
         greedy = self.greedy_action(state)
         actions = list(self.q1[state].keys())
-        prob = [1 - self.epsilon + self.epsilon / len(actions) if action == greedy else self.epsilon / len(actions) for
-                action in actions]
+        prob = [epsilon_prob(greedy, action, len(actions), self.epsilon) for action in actions]
         return np.random.choice(actions, p=prob)
 
     def greedy_action(self, state):
@@ -48,7 +100,7 @@ class DoubleQLearning:
         q1[state][action] += self.alpha * (reward + delta)
 
 
-def generate_episode(env: DoubleQLearningEnv, algorithm: DoubleQLearning):
+def generate_episode(env: DoubleQLearningEnv, algorithm: Algorithm):
     done = False
     obs = env.reset()
     while not done:
@@ -61,11 +113,11 @@ def generate_episode(env: DoubleQLearningEnv, algorithm: DoubleQLearning):
     return obs
 
 
-def perform_algorithm_eval(env, n_episodes=300, n_avg=10000):
+def perform_algorithm_eval(env, algorithm_supplier, n_episodes=300, n_avg=10000):
     ret = np.zeros((n_episodes,))
     for i in range(n_avg):
         print('Averaging:', i)
-        algorithm = DoubleQLearning(env)
+        algorithm = algorithm_supplier(env)
         for ep in range(n_episodes):
             ret[ep] += generate_episode(env, algorithm) == DoubleQLearningEnv.POS_TERM_LEFT
     return ret / n_avg
@@ -73,6 +125,7 @@ def perform_algorithm_eval(env, n_episodes=300, n_avg=10000):
 
 if __name__ == '__main__':
     env = DoubleQLearningEnv()
-    values = perform_algorithm_eval(env)
-    data = [go.Scatter(y=values)]
+    q = perform_algorithm_eval(env, QLearning)
+    double_q = perform_algorithm_eval(env, DoubleQLearning)
+    data = [go.Scatter(y=q, name='Q-Learning'), go.Scatter(y=double_q, name='Double Q-Learning')]
     py.plot(data)
