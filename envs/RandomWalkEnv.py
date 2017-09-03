@@ -8,10 +8,13 @@ class RandomWalk(Env):
     ACTION_LEFT = 0
     ACTION_RIGHT = 1
 
-    def __init__(self, left_reward=0):
-        self.states = np.array([left_reward, 0, 0, 0, 0, 0, 1])
+    def __init__(self, n_states=7, left_reward=0, right_reward=1, start_position=3):
+        self.states = np.zeros((n_states,))
+        self.states[0] = left_reward
+        self.states[-1] = right_reward
+        self.start_position = len(self.states) // 2 if start_position is None else start_position
         self.action_space = Discrete(2)
-        self.observation_space = Discrete(7)
+        self.observation_space = Discrete(len(self.states))
         self._reset()
 
     def _render(self, mode='human', close=False):
@@ -20,7 +23,7 @@ class RandomWalk(Env):
         print('Render: {}'.format(tmp))
 
     def _reset(self):
-        self.position = 3
+        self.position = self.start_position
         return self._observations()
 
     def _observations(self):
