@@ -1,12 +1,13 @@
 import sys
+
+import numpy as np
+import plotly.graph_objs as go
+import plotly.offline as py
 from gym import Env
 
-from envs.GridWorldEnv import GridWorld
 from double_q_learning import epsilon_prob
-from n_step_sarsa import Algorithm, generate_episode, perform_algo_eval
-import numpy as np
-import plotly.offline as py
-import plotly.graph_objs as go
+from envs.GridWorldEnv import GridWorld
+from n_step_sarsa import Algorithm, perform_algo_eval, NStepSarsa
 
 
 class Entry:
@@ -49,6 +50,12 @@ class NStepTreeBackup(Algorithm):
         return epsilon_prob(greedy, action, len(self.actions), self.epsilon)
 
     def action(self, state):
+        if self.t > 0:
+            return self.get_entry(self.t).action
+        else:
+            return self._action(state)
+
+    def _action(self, state):
         return np.random.choice(self.actions, p=self.probs(state))
 
     def greedy_action(self, state):
@@ -63,6 +70,12 @@ class NStepTreeBackup(Algorithm):
     def store(self, time, entry):
         self.history[self._idx(time)] = entry
 
+    def calc_delta_sum(self, action_taken, greedy, next_state):
+        # Why it doesn't convert with filter enabled?
+        # f = filter(lambda a: a != action_taken, self.actions)
+        return sum(map(lambda a: self.prob(a, greedy) * self.action_values[next_state][a],
+                       self.actions))
+
     def on_new_state(self, state, action, reward, next_state, done):
         if self.t == 0:
             new_entry = Entry()
@@ -76,14 +89,14 @@ class NStepTreeBackup(Algorithm):
             entry_t = self.get_entry(self.t)
             if done:
                 self.T = self.t + 1
-                new_entry.delta = reward - entry_t.action_value
+                entry_t.delta = reward - entry_t.action_value
             else:
                 greedy = self.greedy_action(next_state)
-                tmp = [self.prob(a, greedy) * self.action_values[next_state][a] for a in self.actions if a != action]
-                entry_t.delta = reward + self.gamma * sum(tmp) - entry_t.action_value
-                new_entry.action = self.action(next_state)
+                tmp = self.calc_delta_sum(action, greedy, next_state)
+                entry_t.delta = reward + self.gamma * tmp - entry_t.action_value
+                new_entry.action = self._action(next_state)
                 new_entry.action_value = self.action_values[next_state][new_entry.action]
-                new_entry.prob = self.prob(new_entry.action, action)
+                new_entry.prob = self.prob(new_entry.action, greedy)
             self.store(self.t, entry_t)
             self.store(self.t + 1, new_entry)
         update_time = self.t - self.n + 1
@@ -106,9 +119,9 @@ class NStepTreeBackup(Algorithm):
 if __name__ == '__main__':
     env = GridWorld()
     ns = np.power(2, np.arange(4))
-    ret = perform_algo_eval(env, lambda n: NStepTreeBackup(env, n), ns, n_avg=10)
+    ret_tree_backup = perform_algo_eval(env, lambda n: NStepTreeBackup(env, n), ns)
 
     data = []
-    for idx, row in enumerate(ret):
+    for idx, row in enumerate(ret_tree_backup):
         data.append(go.Scatter(y=row, name='{}-step Tree Backup'.format(ns[idx])))
     py.plot(data)
