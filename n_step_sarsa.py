@@ -58,6 +58,12 @@ class NStepSarsa(Algorithm):
         return self.get_state(time) + (self.get_action(time),)
 
     def action(self, state):
+        if self.t > 0:
+            return self.get_action(self.t)
+        else:
+            return self._action(state)
+
+    def _action(self, state):
         greedy = self.greedy_action(state)
         probs = [epsilon_prob(greedy, action, len(self.actions), self.epsilon) for action in self.actions]
         return np.random.choice(self.actions, p=probs)
@@ -76,7 +82,7 @@ class NStepSarsa(Algorithm):
             if done:
                 self.T = self.t + 1
             else:
-                self.store_action(self.action(next_state), self.t + 1)
+                self.store_action(self._action(next_state), self.t + 1)
         update_time = self.t - self.n + 1
         if update_time >= 0:
             update_key = self.get_key(update_time)
@@ -96,11 +102,13 @@ class NStepSarsa(Algorithm):
                     range(update_time + 1, min(update_time + self.n, self.T) + 1)])
 
 
-def generate_episode(env: Env, algo: Algorithm):
+def generate_episode(env: Env, algo: Algorithm, render=False):
     done = False
     count = 0
     obs = env.reset()
     while not done:
+        if render:
+            env.render()
         prev_obs = obs
         action = algo.action(prev_obs)
         obs, reward, done, _ = env.step(action)
@@ -109,7 +117,7 @@ def generate_episode(env: Env, algo: Algorithm):
     return count
 
 
-def perform_algo_eval(env, algo_supplier, ns, n_avg=100, n_ep=100):
+def perform_algo_eval(env, algo_supplier, ns, n_avg=100, n_ep=100, render=False):
     ret = np.zeros((len(ns), n_ep))
     for i in range(n_avg):
         for n_idx, n in enumerate(ns):
