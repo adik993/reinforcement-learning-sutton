@@ -50,6 +50,7 @@ class MazeShortLong(Maze):
     def __init__(self):
         super().__init__(shape=(6, 9), start=(0, 8), end=(5, 3))
         self.t = 0
+        self.change_time = 1000
 
     def _init_walls(self):
         self.world[3, 0:8] = Maze.WALL
@@ -63,7 +64,7 @@ class MazeShortLong(Maze):
         return super()._reset()
 
     def _step(self, action):
-        if self.t == 1000:
+        if self.t == self.change_time:
             self._move_wall()
         self.t += 1
         obs, reward, done, aux = super()._step(action)
@@ -74,6 +75,10 @@ class MazeShortLong(Maze):
 
 
 class MazeLongShort(MazeShortLong):
+    def __init__(self):
+        super().__init__()
+        self.change_time = 3000
+
     def _init_walls(self):
         self.world[3, 1:9] = Maze.WALL
 
