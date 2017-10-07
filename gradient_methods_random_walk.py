@@ -1,5 +1,6 @@
 from gym import Env
 
+from double_q_learning import Algorithm
 from envs.CliffWalkingEnv import minmax
 from envs.RandomWalkEnv import RandomWalk
 import numpy as np
@@ -66,7 +67,7 @@ class GradientMonteCarlo(EpisodeAlgorithm):
     def __init__(self, env: Env, alpha=2e-5):
         self.alpha = alpha
         self.actions = np.arange(env.action_space.n)
-        self.state_value = ValueFunction((N_STATES,), aggregation=100)
+        self.state_value = ValueFunction((N_STATES,), aggregation=N_AGGREGATE)
 
     def action(self, state):
         return np.random.choice(self.actions)
@@ -76,6 +77,22 @@ class GradientMonteCarlo(EpisodeAlgorithm):
         reward = history[-1].reward
         for state in history[:-1]:
             self.state_value[state.state] += self.alpha * (reward - self.state_value[state.state])
+
+
+class SemiGradientTD(Algorithm):
+    def __init__(self, env: Env, alpha=2e-4, gamma=1):
+        self.alpha = alpha
+        self.gamma = gamma
+        self.actions = np.arange(env.action_space.n)
+        self.state_value = ValueFunction((N_STATES,), aggregation=N_AGGREGATE)
+
+    def action(self, state):
+        return np.random.choice(self.actions)
+
+    def on_new_state(self, state, action, reward, next_state, done):
+        value_next = 0 if done else self.state_value[next_state]
+        self.state_value[state] += self.alpha * (
+            reward + self.gamma * value_next - self.state_value[state])
 
 
 def generate_episode(env: Env, algorithm: EpisodeAlgorithm):
@@ -91,13 +108,29 @@ def generate_episode(env: Env, algorithm: EpisodeAlgorithm):
     return history
 
 
+def generate_episode_td(env: Env, algorithm: Algorithm):
+    done = False
+    obs = env.reset()
+    while not done:
+        prev_obs = obs
+        action = algorithm.action(prev_obs)
+        obs, reward, done, aux = env.step(action)
+        algorithm.on_new_state(prev_obs, action, reward, obs, done)
+
+
 if __name__ == '__main__':
     env = RandomWalk(n_states=N_STATES + 2, left_reward=-1, right_reward=1, start_position=None, max_step=MAX_STEP)
-    algorithm = GradientMonteCarlo(env)
+    monte_carlo = GradientMonteCarlo(env)
     for i in range(int(1e5)):
         print('Episode:', i)
-        generate_episode(env, algorithm)
+        generate_episode(env, monte_carlo)
 
-    data = [go.Scatter(y=algorithm.state_value.value.repeat(N_AGGREGATE), name='Gradient Monte Carlo'),
+    td = SemiGradientTD(env)
+    for i in range(int(1e5)):
+        print('Episode:', i)
+        generate_episode_td(env, td)
+
+    data = [go.Scatter(y=monte_carlo.state_value.value.repeat(N_AGGREGATE), name='Gradient Monte Carlo'),
+            go.Scatter(y=td.state_value.value.repeat(N_AGGREGATE), name='Semi Gradient TD'),
             go.Scatter(y=TRUE_VALUES, name='True Values')]
     py.plot(data)
