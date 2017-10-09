@@ -3,7 +3,8 @@ import numpy as np
 from features.TileCoding import *
 
 from double_q_learning import Algorithm, epsilon_prob
-from dyna_q import randomargmax
+import plotly.offline as py
+import plotly.graph_objs as go
 
 POSITION_MIN = -1.2
 POSITION_MAX = 0.6
@@ -85,13 +86,27 @@ def generate_episode(env: gym.Env, algorithm: Algorithm, render=False):
     return counter
 
 
+def perform_alpha_test(env, algorithm_supplier, alphas, n_avg=100, n_episode=500):
+    results = {alpha: np.zeros((n_episode,)) for alpha in alphas}
+    for alpha in alphas:
+        for i in range(n_avg):
+            for ep in range(n_episode):
+                print('Run: {}, alpha: {}, ep: {}'.format(i, alpha, ep))
+                algorithm = algorithm_supplier(alpha)
+                results[alpha][ep] += generate_episode(env, algorithm, render=False)
+        results[alpha] /= n_avg
+    return results
+
+
 if __name__ == '__main__':
     env = gym.make('MountainCar-v0')
-    # env._max_episode_steps = int(1e6)
+    env._max_episode_steps = int(1e6)
     algorithm = SemiGradientSarsa(env, TilingValueFunction())
-    learn_limit = 500
-    for i in range(600):
-        if i > learn_limit:
-            algorithm.epsilon = 0
-        steps = generate_episode(env, algorithm, render=i > learn_limit)
-        print('Episode({}): {}'.format(i, steps))
+    alphas = [0.1 / N_TILINGS, 0.2 / N_TILINGS, 0.5 / N_TILINGS]
+    results = perform_alpha_test(env, lambda alpha: SemiGradientSarsa(env, TilingValueFunction(), alpha), alphas)
+
+    data=[]
+    for alpha, values in results.items():
+        data.append(go.Scatter(y=values, name='alpha={}'.format(alpha)))
+
+    py.plot(data)
