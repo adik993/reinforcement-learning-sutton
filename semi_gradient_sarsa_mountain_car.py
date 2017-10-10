@@ -5,6 +5,9 @@ from features.TileCoding import *
 from double_q_learning import Algorithm, epsilon_prob
 import plotly.offline as py
 import plotly.graph_objs as go
+from joblib import Parallel, delayed
+from multiprocessing import cpu_count
+from math import ceil
 
 POSITION_MIN = -1.2
 POSITION_MAX = 0.6
@@ -86,26 +89,47 @@ def generate_episode(env: gym.Env, algorithm: Algorithm, render=False):
     return counter
 
 
+def do_work(n_avg, n_episode, algorithm_supplier, alpha):
+    result = np.zeros((n_episode,))
+    for i in range(n_avg):
+        algorithm = algorithm_supplier(alpha)
+        for ep in range(n_episode):
+            steps = generate_episode(env, algorithm, render=False)
+            result[ep] += steps
+            print('Run: {}, alpha: {}, ep: {}, steps: {}'.format(i, alpha, ep, steps))
+    return result
+
+
+def calc_batch_size(size, batches, batch_idx):
+    return max(0, min(size - batch_idx * ceil(size / batches), ceil(size / batches)))
+
+
 def perform_alpha_test(env, algorithm_supplier, alphas, n_avg=100, n_episode=500):
     results = {alpha: np.zeros((n_episode,)) for alpha in alphas}
-    for alpha in alphas:
-        for i in range(n_avg):
-            for ep in range(n_episode):
-                print('Run: {}, alpha: {}, ep: {}'.format(i, alpha, ep))
-                algorithm = algorithm_supplier(alpha)
-                results[alpha][ep] += generate_episode(env, algorithm, render=False)
-        results[alpha] /= n_avg
+    with Parallel(n_jobs=cpu_count()) as parallel:
+        for alpha in alphas:
+            tmp = np.sum(parallel(
+                delayed(do_work)(calc_batch_size(n_avg, cpu_count(), batch_idx), n_episode, algorithm_supplier, alpha)
+                for batch_idx in range(cpu_count())), axis=0)
+            results[alpha] = tmp
+            results[alpha] /= n_avg
     return results
+
+
+class GimmeSarsa:
+    def __init__(self, env):
+        self.env = env
+
+    def __call__(self, alpha):
+        return SemiGradientSarsa(self.env, TilingValueFunction(), alpha)
 
 
 if __name__ == '__main__':
     env = gym.make('MountainCar-v0')
     env._max_episode_steps = int(1e6)
-    algorithm = SemiGradientSarsa(env, TilingValueFunction())
     alphas = [0.1 / N_TILINGS, 0.2 / N_TILINGS, 0.5 / N_TILINGS]
-    results = perform_alpha_test(env, lambda alpha: SemiGradientSarsa(env, TilingValueFunction(), alpha), alphas)
-
-    data=[]
+    results = perform_alpha_test(env, GimmeSarsa(env), alphas)
+    data = []
     for alpha, values in results.items():
         data.append(go.Scatter(y=values, name='alpha={}'.format(alpha)))
 
