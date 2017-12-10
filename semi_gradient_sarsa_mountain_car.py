@@ -194,7 +194,7 @@ def do_alpha_work(n_avg, n_episode, algorithm_supplier, alpha):
     for i in range(n_avg):
         algorithm = algorithm_supplier(alpha)
         for ep in range(n_episode):
-            steps = generate_episode(env, algorithm, render=False)
+            steps = generate_episode(algorithm_supplier.env, algorithm, render=False)
             result[ep] += steps
             print('Run: {}, alpha: {}, ep: {}, steps: {}'.format(i, alpha, ep, steps))
     return result
@@ -204,7 +204,7 @@ def calc_batch_size(size, batches, batch_idx):
     return max(0, min(size - batch_idx * ceil(size / batches), ceil(size / batches)))
 
 
-def perform_alpha_test(env, algorithm_supplier, alphas, n_avg=100, n_episode=500):
+def perform_alpha_test(algorithm_supplier, alphas, n_avg=100, n_episode=500):
     results = {alpha: np.zeros((n_episode,)) for alpha in alphas}
     with Parallel(n_jobs=cpu_count()) as parallel:
         for alpha in alphas:
@@ -222,7 +222,7 @@ def do_n_work(n_avg, n_episode, algorithm_supplier, alpha, n):
     for i in range(n_avg):
         algorithm = algorithm_supplier(alpha, n)
         for ep in range(n_episode):
-            steps = generate_episode(env, algorithm, render=False)
+            steps = generate_episode(algorithm_supplier.env, algorithm, render=False)
             result[ep] += steps
             print('Run: {}, n: {}, ep: {}, steps: {}'.format(i, n, ep, steps))
     return result
@@ -261,13 +261,12 @@ if __name__ == '__main__':
     env = gym.make('MountainCar-v0')
     env._max_episode_steps = int(1e6)
     # alphas = [0.1 / N_TILINGS, 0.2 / N_TILINGS, 0.5 / N_TILINGS]
-    # results = perform_alpha_test(env, GimmeSarsa(env), alphas)
+    # results = perform_alpha_test(GimmeSarsa(env), alphas)
     # data = []
     # for alpha, values in results.items():
     #     data.append(go.Scatter(y=values, name='alpha={}'.format(alpha)))
-
+    #
     # py.plot(data)
-
     params = [(0.5 / N_TILINGS, 1), (0.3 / N_TILINGS, 8)]
     results = perform_n_test(GimmeNStepSarsa(env), params)
     data = []
