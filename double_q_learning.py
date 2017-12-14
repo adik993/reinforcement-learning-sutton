@@ -6,33 +6,7 @@ import numpy as np
 import plotly.offline as py
 import plotly.graph_objs as go
 
-
-def randomargmax(d, key=None):
-    k_max = max(d, key=key)
-    return np.random.choice([k for k, v in d.items() if d[k_max] == v])
-
-
-def epsilon_prob(greedy, action, n_actions, epsilon):
-    if greedy == action:
-        return epsilon_greedy_prob(n_actions, epsilon)
-    else:
-        return epsilon_explore_prob(n_actions, epsilon)
-
-
-def epsilon_greedy_prob(n_actions, epsilon):
-    return 1 - epsilon + epsilon / n_actions
-
-
-def epsilon_explore_prob(n_actions, epsilon):
-    return epsilon / n_actions
-
-
-class Algorithm:
-    def action(self, state):
-        raise NotImplementedError()
-
-    def on_new_state(self, state, action, reward, next_state, done):
-        raise NotImplementedError()
+from utils import epsilon_prob, randomargmax, Algorithm
 
 
 class QLearning(Algorithm):

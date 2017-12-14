@@ -2,8 +2,6 @@ from gym import Env
 from gym.spaces import Discrete
 import numpy as np
 
-from envs.WindyGridWorldEnv import minmax
-
 
 class RandomWalk(Env):
     metadata = {'render.modes': ['human']}
@@ -38,7 +36,7 @@ class RandomWalk(Env):
             self.position -= step
         else:
             self.position += step
-        self.position = minmax(self.position, 0, len(self.states) - 1)
+        self.position = np.clip(self.position, 0, len(self.states) - 1)
 
         done = self.position == 0 or self.position == len(self.states) - 1
         reward = self.states[self.position]

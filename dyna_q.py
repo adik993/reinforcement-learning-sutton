@@ -1,15 +1,12 @@
 import random
 
-from double_q_learning import epsilon_prob
-from envs.MazeEnv import BasicMaze, Maze, MazeShortLong, MazeLongShort
-from n_step_sarsa import Algorithm
 import numpy as np
 import plotly.graph_objs as go
 import plotly.offline as py
 
-
-def randomargmax(a: np.ndarray):
-    return np.random.choice(np.flatnonzero(a == a.max()))
+from double_q_learning import epsilon_prob
+from envs.MazeEnv import Maze, MazeLongShort
+from utils import randomargmax, Algorithm
 
 
 class DynaQ(Algorithm):

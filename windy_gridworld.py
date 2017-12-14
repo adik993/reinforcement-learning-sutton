@@ -4,10 +4,12 @@ from envs.WindyGridWorldEnv import WindyGridWorld
 from log import make_logger
 import numpy as np
 
+from utils import Algorithm
+
 log = make_logger(__name__)
 
 
-class Sarsa:
+class Sarsa(Algorithm):
     def __init__(self, env: Env, alpha=0.5, gamma=1, epsilon=0.1):
         self.alpha = alpha
         self.gamma = gamma

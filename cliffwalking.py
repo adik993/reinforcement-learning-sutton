@@ -1,9 +1,8 @@
 from gym import Env
 
 from envs.CliffWalkingEnv import CliffWalking
-from windy_gridworld import Sarsa, generate_episode
-import numpy as np
 from log import make_logger
+from windy_gridworld import Sarsa, generate_episode
 
 log = make_logger(__name__)
 

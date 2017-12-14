@@ -1,7 +1,6 @@
 from gym import Env
 from gym.spaces import Tuple, Discrete
-
-from envs.CliffWalkingEnv import minmax
+import numpy as np
 from envs.GridWorldEnv import GridWorld
 
 
@@ -18,8 +17,8 @@ class Maze(GridWorld):
         return self.world[position] == Maze.WALL
 
     def _move(self, move):
-        axis0 = minmax(self.position[0] + move[0], 0, self.world.shape[0] - 1)
-        axis1 = minmax(self.position[1] + move[1], 0, self.world.shape[1] - 1)
+        axis0 = np.clip(self.position[0] + move[0], 0, self.world.shape[0] - 1)
+        axis1 = np.clip(self.position[1] + move[1], 0, self.world.shape[1] - 1)
         if not self.is_wall((axis0, axis1)):
             self.position = (axis0, axis1)
 

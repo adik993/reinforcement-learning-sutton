@@ -6,13 +6,7 @@ import numpy as np
 import plotly.offline as py
 import plotly.graph_objs as go
 
-
-class Algorithm:
-    def action(self, state):
-        raise NotImplementedError()
-
-    def on_new_state(self, state, action, reward, next_state, done):
-        raise NotImplementedError()
+from utils import Algorithm
 
 
 class NStepSarsa(Algorithm):

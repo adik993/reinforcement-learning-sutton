@@ -7,6 +7,8 @@ from randomwalk import TRUE_VALUES, rmse
 import plotly.offline as py
 import plotly.graph_objs as go
 
+from utils import Algorithm
+
 
 class RandomPolicy:
     def __init__(self, env: Env):
@@ -26,7 +28,7 @@ class SpecificPolicy:
         return self.actions[self.index]
 
 
-class TD:
+class TD(Algorithm):
     def __init__(self, env: Env, policy, alpha=0.1, gamma=1, lam=0.9):
         self.alpha = alpha
         self.gamma = gamma
@@ -41,7 +43,7 @@ class TD:
     def action(self, state):
         return self.policy[state]
 
-    def on_new_state(self, state, reward, next_state, done):
+    def on_new_state(self, state, action, reward, next_state, done):
         v = self.values[state]
         v_next = self.values[next_state]
         delta = reward + self.gamma * v_next - v
@@ -61,7 +63,7 @@ def generate_episode(env: Env, algorithm: TD):
         prev_obs = obs
         action = algorithm.action(prev_obs)
         obs, reward, done, aux = env.step(action)
-        algorithm.on_new_state(prev_obs, reward, obs, done)
+        algorithm.on_new_state(prev_obs, action, reward, obs, done)
 
 
 def perform_lam_test(env, lams, alphas, n_avg=1, n=10):

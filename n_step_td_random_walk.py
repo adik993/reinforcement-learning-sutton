@@ -1,21 +1,14 @@
 import sys
-from collections import deque
 
-from envs.RandomWalkEnv import RandomWalk, Env
-from randomwalk import rmse
 import numpy as np
-import plotly.offline as py
 import plotly.graph_objs as go
+import plotly.offline as py
 
+from envs.RandomWalkEnv import RandomWalk
+from randomwalk import rmse
+from utils import Algorithm
 
 TRUE_VALUES = np.arange(-20, 22, 2) / 20.0
-
-class Algorithm:
-    def action(self, state):
-        raise NotImplementedError()
-
-    def on_new_state(self, state, action, reward, next_state, done):
-        raise NotImplementedError()
 
 
 class NStepTD(Algorithm):

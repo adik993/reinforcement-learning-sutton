@@ -3,10 +3,6 @@ from gym.spaces import Tuple, Discrete
 import numpy as np
 
 
-def minmax(value, low, high):
-    return max(min(value, high), low)
-
-
 class CliffWalking(Env):
     metadata = {'render.modes': ['human']}
     ACTION_UP = 0
@@ -55,8 +51,8 @@ class CliffWalking(Env):
         return -100 if felt else -1
 
     def _move(self, by):
-        axis0 = minmax(self.position[0] + by[0], 0, self.world.shape[0] - 1)
-        axis1 = minmax(self.position[1] + by[1], 0, self.world.shape[1] - 1)
+        axis0 = np.clip(self.position[0] + by[0], 0, self.world.shape[0] - 1)
+        axis1 = np.clip(self.position[1] + by[1], 0, self.world.shape[1] - 1)
         felt = False
         if self.world[axis0, axis1] == CliffWalking.CLIFF:
             felt = True

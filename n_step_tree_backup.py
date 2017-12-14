@@ -7,7 +7,8 @@ from gym import Env
 
 from double_q_learning import epsilon_prob
 from envs.GridWorldEnv import GridWorld
-from n_step_sarsa import Algorithm, perform_algo_eval, NStepSarsa
+from n_step_sarsa import perform_algo_eval
+from utils import Algorithm
 
 
 class Entry:

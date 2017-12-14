@@ -1,11 +1,11 @@
 from gym import Env
 
-from double_q_learning import Algorithm
-from envs.CliffWalkingEnv import minmax
 from envs.RandomWalkEnv import RandomWalk
 import numpy as np
 import plotly.offline as py
 import plotly.graph_objs as go
+
+from utils import EpisodeAlgorithm, Algorithm
 
 N_AGGREGATE = 100
 N_STATES = 1000
@@ -21,7 +21,7 @@ def find_true_values():
             for action in [-1, 1]:
                 for step in range(1, MAX_STEP + 1):
                     step *= action
-                    next_state = minmax(state + step, 0, N_STATES + 1)
+                    next_state = np.clip(state + step, 0, N_STATES + 1)
                     prob = 1 / (MAX_STEP * 2)
                     new[state] += prob * (0 + new[next_state])
         error = np.abs(np.sum(old - new))
@@ -38,14 +38,6 @@ class State:
     def __init__(self, state, reward):
         self.state = state
         self.reward = reward
-
-
-class EpisodeAlgorithm:
-    def action(self, state):
-        raise NotImplementedError()
-
-    def on_new_episode(self, history):
-        raise NotImplementedError()
 
 
 class ValueFunction:

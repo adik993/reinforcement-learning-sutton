@@ -2,8 +2,6 @@ from gym import Env
 import numpy as np
 from gym.spaces import Tuple, Discrete
 
-from envs.WindyGridWorldEnv import minmax
-
 
 class GridWorld(Env):
     metadata = {'render.modes': ['human']}
@@ -48,8 +46,8 @@ class GridWorld(Env):
         return self._obs(), -1, done, self.world
 
     def _move(self, move):
-        axis0 = minmax(self.position[0] + move[0], 0, self.world.shape[0] - 1)
-        axis1 = minmax(self.position[1] + move[1], 0, self.world.shape[1] - 1)
+        axis0 = np.clip(self.position[0] + move[0], 0, self.world.shape[0] - 1)
+        axis1 = np.clip(self.position[1] + move[1], 0, self.world.shape[1] - 1)
         self.position = (axis0, axis1)
 
     def _reset(self):

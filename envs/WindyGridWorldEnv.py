@@ -7,10 +7,6 @@ def inc(tuple, val):
     return tuple[0] + val, tuple[1] + val
 
 
-def minmax(value, low, high):
-    return max(min(value, high), low)
-
-
 class WindyGridWorld(Env):
     metadata = {'render.modes': ['human']}
     ACTION_UP = 0
@@ -71,9 +67,9 @@ class WindyGridWorld(Env):
 
     def _move(self, by):
         wind = self._get_wind(self.position[1])
-        axis1 = minmax(self.position[1] + by[1], 0, self.size[1] - 1)
+        axis1 = np.clip(self.position[1] + by[1], 0, self.size[1] - 1)
         axis0 = self.position[0] + by[0] - wind
-        axis0 = minmax(axis0, 0, self.size[0] - 1)
+        axis0 = np.clip(axis0, 0, self.size[0] - 1)
         self.position = axis0, axis1
 
     def _get_wind(self, axis1):
