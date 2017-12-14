@@ -4,19 +4,25 @@ import sys
 
 from features.TileCoding import *
 
-from double_q_learning import Algorithm, epsilon_prob
 import plotly.offline as py
 import plotly.graph_objs as go
+from mpl_toolkits.mplot3d import Axes3D
+import matplotlib.pyplot as plt
+from matplotlib import cm
 from joblib import Parallel, delayed
 from multiprocessing import cpu_count
-from math import ceil
+
+from utils import epsilon_prob, randargmax, Algorithm, calc_batch_size
 
 POSITION_MIN = -1.2
 POSITION_MAX = 0.6
+POSITION_GOAL = 0.5
 VELOCITY_MIN = -0.07
 VELOCITY_MAX = 0.07
 N_TILINGS = 8
-MAX_SIZE = 2048
+MAX_SIZE = 4096
+
+EPSILON = 0
 
 
 class TilingValueFunction:
@@ -34,7 +40,11 @@ class TilingValueFunction:
                      [action])
 
     def __getitem__(self, item):
-        return self.weights[self._idx(item)]
+        position, _, _ = item
+        if position >= POSITION_GOAL:
+            return np.zeros(1)
+        else:
+            return self.weights[self._idx(item)]
 
     def estimated(self, item):
         return self[item].sum()
@@ -44,7 +54,8 @@ class TilingValueFunction:
 
 
 class SemiGradientSarsa(Algorithm):
-    def __init__(self, env: gym.Env, value_function: TilingValueFunction, alpha=0.5 / N_TILINGS, gamma=1, epsilon=0.2):
+    def __init__(self, env: gym.Env, value_function: TilingValueFunction, alpha=0.5 / N_TILINGS, gamma=1.0,
+                 epsilon=EPSILON):
         self.alpha = alpha
         self.gamma = gamma
         self.epsilon = epsilon
@@ -75,7 +86,7 @@ class SemiGradientSarsa(Algorithm):
 
     def on_new_state(self, state, action, reward, next_state, done):
         self.next_action = self._action(next_state)
-        q_next = 0 if done else self.value_function.estimated((*next_state, self.next_action))
+        q_next = self.value_function.estimated((*next_state, self.next_action))
         q = self.value_function.estimated((*state, action))
         delta = reward + self.gamma * q_next - q
         update = self.alpha * delta
@@ -90,10 +101,16 @@ class Entry:
         self.action = action
         self.reward = reward
 
+    def __str__(self) -> str:
+        return 'Entry(state={}, action={}, reward={})'.format(self.state, self.action, self.reward)
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
 
 class NStepSemiGradientSarsa(Algorithm):
     def __init__(self, env: gym.Env, value_function: TilingValueFunction, n, alpha=0.5 / N_TILINGS, gamma=1,
-                 epsilon=0.2):
+                 epsilon=EPSILON):
         self.n = n
         self.alpha = alpha
         self.gamma = gamma
@@ -142,7 +159,7 @@ class NStepSemiGradientSarsa(Algorithm):
 
     def greedy_action(self, state):
         array = np.array([self.value_function.estimated((*state, action)) for action in self.actions])
-        return np.argmax(array)
+        return randargmax(array)
 
     def calc_returns(self, update_time):
         return sum([pow(self.gamma, t - update_time - 1) * self.get_entry(t).reward
@@ -159,7 +176,7 @@ class NStepSemiGradientSarsa(Algorithm):
                 next_action = self._action(next_state)
             self.store(next_state, next_action, reward, self.t + 1)
         update_time = self.t - self.n + 1
-        if update_time > 0:
+        if update_time >= 0:
             key_t = self._get_key(update_time)
             key_t_plus_n = self._get_key(update_time + self.n)
             returns = self.calc_returns(update_time)
@@ -200,10 +217,6 @@ def do_alpha_work(n_avg, n_episode, algorithm_supplier, alpha):
     return result
 
 
-def calc_batch_size(size, batches, batch_idx):
-    return max(0, min(size - batch_idx * ceil(size / batches), ceil(size / batches)))
-
-
 def perform_alpha_test(algorithm_supplier, alphas, n_avg=100, n_episode=500):
     results = {alpha: np.zeros((n_episode,)) for alpha in alphas}
     with Parallel(n_jobs=cpu_count()) as parallel:
@@ -224,7 +237,7 @@ def do_n_work(n_avg, n_episode, algorithm_supplier, alpha, n):
         for ep in range(n_episode):
             steps = generate_episode(algorithm_supplier.env, algorithm, render=False)
             result[ep] += steps
-            print('Run: {}, n: {}, ep: {}, steps: {}'.format(i, n, ep, steps))
+            print('Run: {:2}, n: {}, ep: {:3}, steps: {:4}'.format(i, n, ep, steps))
     return result
 
 
@@ -257,20 +270,66 @@ class GimmeNStepSarsa:
         return NStepSemiGradientSarsa(self.env, TilingValueFunction(), n, alpha)
 
 
-if __name__ == '__main__':
-    env = gym.make('MountainCar-v0')
-    env._max_episode_steps = int(1e6)
-    # alphas = [0.1 / N_TILINGS, 0.2 / N_TILINGS, 0.5 / N_TILINGS]
-    # results = perform_alpha_test(GimmeSarsa(env), alphas)
-    # data = []
-    # for alpha, values in results.items():
-    #     data.append(go.Scatter(y=values, name='alpha={}'.format(alpha)))
-    #
-    # py.plot(data)
-    params = [(0.5 / N_TILINGS, 1), (0.3 / N_TILINGS, 8)]
+def plot_value_function_using_plotly(value_function):
+    actions = np.arange(env.action_space.n)
+    position_range = np.arange(POSITION_MIN, POSITION_MAX + 0.1, 0.1)  # X
+    velocity_range = np.arange(VELOCITY_MIN, VELOCITY_MAX + 0.001, 0.001)  # Y
+    Z = np.zeros((len(velocity_range), len(position_range)))
+    for axis0, velocity in enumerate(velocity_range):
+        for axis1, position in enumerate(position_range):
+            Z[axis0, axis1] = max([-value_function.estimated((position, velocity, action)) for action in actions])
+    surface = go.Surface(x=position_range, y=velocity_range, z=Z)
+    layout = go.Layout(scene=dict(xaxis={'title': 'Position', 'range': [POSITION_MIN, POSITION_MAX]},
+                                  yaxis={'title': 'Velocity', 'range': [VELOCITY_MIN, VELOCITY_MAX]},
+                                  aspectratio=dict(x=1, y=1, z=0.5)))
+    py.plot(go.Figure(data=[surface], layout=layout))
+
+
+def plot_value_function_using_matplotlib(value_function):
+    actions = np.arange(env.action_space.n)
+    position_range = np.arange(POSITION_MIN, POSITION_MAX + 0.1, 0.1)  # X
+    velocity_range = np.arange(VELOCITY_MIN, VELOCITY_MAX + 0.001, 0.001)  # Y
+    Z = np.zeros((len(velocity_range), len(position_range)))
+    X, Y = np.meshgrid(position_range, velocity_range)
+    for (axis0, axis1), _ in np.ndenumerate(Z):
+        Z[axis0, axis1] = max([-value_function.estimated((X[axis0, axis1], Y[axis0, axis1], action))
+                               for action in actions])
+
+    fig = plt.figure()
+    ax = fig.gca(projection='3d')
+    ax.plot_surface(X, Y, Z, cmap=cm.coolwarm)
+    plt.show()
+
+
+def plot_sarsa_steps_by_alpha(env):
+    alphas = [0.1 / N_TILINGS, 0.2 / N_TILINGS, 0.5 / N_TILINGS]
+    results = perform_alpha_test(env, GimmeSarsa(env), alphas)
+    data = []
+    for alpha, values in results.items():
+        data.append(go.Scatter(y=values, name='alpha={}'.format(alpha)))
+    py.plot(data)
+
+
+def plot_n_step_sarsa_by_alpha_and_n(env):
+    params = [(0.5 / N_TILINGS, 1), (0.2 / N_TILINGS, 8)]
     results = perform_n_test(GimmeNStepSarsa(env), params)
     data = []
     for n, values in results.items():
         data.append(go.Scatter(y=values, name='n={}'.format(n)))
-
     py.plot(data)
+
+
+if __name__ == '__main__':
+    env = gym.make('MountainCar-v0')
+    env._max_episode_steps = int(1e6)
+    # plot_sarsa_steps_by_alpha(env)
+
+    plot_n_step_sarsa_by_alpha_and_n(env)
+
+    # value_function = TilingValueFunction(N_TILINGS)
+    # for i in range(100):
+    #     # steps = generate_episode(env, NStepSemiGradientSarsa(env, value_function, 8, 0.5 / N_TILINGS))
+    #     steps = generate_episode(env, SemiGradientSarsa(env, value_function, 0.5 / N_TILINGS))
+    #     print('Ep: {:3} steps: {:3}'.format(i, steps))
+    #
+    # plot_value_function_using_plotly(value_function)
