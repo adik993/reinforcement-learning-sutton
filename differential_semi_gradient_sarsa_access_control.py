@@ -5,15 +5,15 @@ import plotly.graph_objs as go
 from plotly import tools
 
 from envs.AcessControlQueueEnv import AccessControlQueueTimeLimit, AccessControlQueue
+from features.TileCoding import IHT
 from utils import Algorithm, randargmax, generate_episode, epsilon_probs, TilingValueFunction
 
 np.random.seed(7)
 
 
 class ValueFunction(TilingValueFunction):
-
     def __init__(self, n_tilings, max_size, n_priorities, n_servers):
-        super().__init__(n_tilings, max_size)
+        super().__init__(n_tilings, IHT(max_size))
         self.n_priorities = n_priorities - 1
         self.n_servers = n_servers
 

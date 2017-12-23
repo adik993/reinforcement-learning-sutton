@@ -12,7 +12,7 @@ from matplotlib import cm
 from joblib import Parallel, delayed
 from multiprocessing import cpu_count
 
-from utils import epsilon_prob, randargmax, Algorithm, calc_batch_size
+from utils import epsilon_prob, randargmax, Algorithm, calc_batch_size, TilingValueFunction
 
 POSITION_MIN = -1.2
 POSITION_MAX = 0.6
@@ -25,32 +25,15 @@ MAX_SIZE = 4096
 EPSILON = 0
 
 
-class TilingValueFunction:
-    def __init__(self, n_tilings=N_TILINGS, max_size=MAX_SIZE):
-        self.iht = IHT(MAX_SIZE)
-        self.n_tilings = n_tilings
-        self.weights = np.zeros((max_size,))
-        self.position_scale = self.n_tilings / (POSITION_MAX - POSITION_MIN)
-        self.velocity_scale = self.n_tilings / (VELOCITY_MAX - VELOCITY_MIN)
+class ValueFunction(TilingValueFunction):
+    def __init__(self, n_tilings: int, iht: IHT):
+        super().__init__(n_tilings, iht)
 
-    def _idx(self, item):
-        position, velocity, action = item
-        return tiles(self.iht, self.n_tilings,
-                     [self.position_scale * position, self.velocity_scale * velocity],
-                     [action])
-
-    def __getitem__(self, item):
-        position, _, _ = item
-        if position >= POSITION_GOAL:
-            return np.zeros(1)
-        else:
-            return self.weights[self._idx(item)]
-
-    def estimated(self, item):
-        return self[item].sum()
-
-    def __setitem__(self, key, value):
-        self.weights[self._idx(key)] = value
+    def scaled_values(self, state):
+        position, velocity = state
+        position_scale = self.n_tilings / (POSITION_MAX - POSITION_MIN)
+        velocity_scale = self.n_tilings / (VELOCITY_MAX - VELOCITY_MIN)
+        return [position * position_scale, velocity * velocity_scale]
 
 
 class SemiGradientSarsa(Algorithm):
@@ -81,16 +64,16 @@ class SemiGradientSarsa(Algorithm):
         return np.random.choice(self.actions, p=self._probs(state))
 
     def greedy_action(self, state):
-        array = np.array([self.value_function.estimated((*state, action)) for action in self.actions])
+        array = np.array([self.value_function.estimated(state, action) for action in self.actions])
         return np.argmax(array)
 
     def on_new_state(self, state, action, reward, next_state, done):
         self.next_action = self._action(next_state)
-        q_next = self.value_function.estimated((*next_state, self.next_action))
-        q = self.value_function.estimated((*state, action))
+        q_next = self.value_function.estimated(next_state, self.next_action)
+        q = self.value_function.estimated(state, action)
         delta = reward + self.gamma * q_next - q
         update = self.alpha * delta
-        self.value_function[(*state, action)] += update
+        self.value_function[state, action] += update
         if done:
             self.next_action = None
 
@@ -138,7 +121,7 @@ class NStepSemiGradientSarsa(Algorithm):
 
     def _get_key(self, t):
         entry = self.get_entry(t)
-        return (*entry.state, entry.action)
+        return entry.state, entry.action
 
     def action(self, state):
         if self.t > 0:
@@ -158,7 +141,7 @@ class NStepSemiGradientSarsa(Algorithm):
         return epsilon_prob(greedy, action, len(self.actions), self.epsilon)
 
     def greedy_action(self, state):
-        array = np.array([self.value_function.estimated((*state, action)) for action in self.actions])
+        array = np.array([self.value_function.estimated(state, action) for action in self.actions])
         return randargmax(array)
 
     def calc_returns(self, update_time):
@@ -182,8 +165,8 @@ class NStepSemiGradientSarsa(Algorithm):
             returns = self.calc_returns(update_time)
             not_last_state = update_time + self.n < self.T
             if not_last_state:
-                returns += pow(self.gamma, self.n) * self.value_function.estimated(key_t_plus_n)
-            self.value_function[key_t] += self.alpha * (returns - self.value_function.estimated(key_t))
+                returns += pow(self.gamma, self.n) * self.value_function.estimated(*key_t_plus_n)
+            self.value_function[key_t] += self.alpha * (returns - self.value_function.estimated(*key_t))
         self.t += 1
         if done and update_time != self.T - 1:
             self.on_new_state(state, action, reward, next_state, done)
@@ -259,7 +242,7 @@ class GimmeSarsa:
         self.env = env
 
     def __call__(self, alpha):
-        return SemiGradientSarsa(self.env, TilingValueFunction(), alpha)
+        return SemiGradientSarsa(self.env, ValueFunction(N_TILINGS, IHT(MAX_SIZE)), alpha)
 
 
 class GimmeNStepSarsa:
@@ -267,7 +250,7 @@ class GimmeNStepSarsa:
         self.env = env
 
     def __call__(self, alpha, n):
-        return NStepSemiGradientSarsa(self.env, TilingValueFunction(), n, alpha)
+        return NStepSemiGradientSarsa(self.env, ValueFunction(N_TILINGS, IHT(MAX_SIZE)), n, alpha)
 
 
 def plot_value_function_using_plotly(value_function):
@@ -326,7 +309,7 @@ if __name__ == '__main__':
 
     plot_n_step_sarsa_by_alpha_and_n(env)
 
-    # value_function = TilingValueFunction(N_TILINGS)
+    # value_function = ValueFunction(N_TILINGS, IHT(MAX_SIZE))
     # for i in range(100):
     #     # steps = generate_episode(env, NStepSemiGradientSarsa(env, value_function, 8, 0.5 / N_TILINGS))
     #     steps = generate_episode(env, SemiGradientSarsa(env, value_function, 0.5 / N_TILINGS))
