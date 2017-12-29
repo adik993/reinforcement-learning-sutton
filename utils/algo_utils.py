@@ -1,10 +1,13 @@
 import itertools
+from collections import deque
 from math import ceil
 
 from gym import Env
 
 from features.TileCoding import tiles
 import numpy as np
+
+from numpy_ringbuffer import RingBuffer
 
 
 def randomargmax(d, key=None):
@@ -47,6 +50,9 @@ class Algorithm:
     def on_new_state(self, state, action, reward, next_state, done):
         raise NotImplementedError()
 
+    def on_episode_done(self, steps):
+        pass
+
 
 class EpisodeAlgorithm:
     def action(self, state):
@@ -70,6 +76,7 @@ def generate_episode(env: Env, algorithm: Algorithm, render=False, print_step=Fa
         obs, reward, done, _ = env.step(action)
         algorithm.on_new_state(prev_obs, action, reward, obs, done)
         counter += 1
+    algorithm.on_episode_done(counter)
     return counter
 
 
@@ -127,3 +134,63 @@ class TilingValueFunction:
 class TilingFunctionCreator:
     def create(self):
         raise NotImplementedError('Implement this method and return subclass of TilingValueFunction')
+
+
+class EpsilonDecay:
+    def __init__(self, max, min, lam):
+        self.max = max
+        self.min = min
+        self.lam = lam
+        self.t = 0
+
+    def step(self):
+        self.t += 1
+
+    def _value(self, t):
+        return self.min + (self.max - self.min) * (np.e ** (-self.lam * self.t))
+
+    def value(self):
+        return self._value(self.t)
+
+
+class Model:
+    def predict(self, state, target=False):
+        raise NotImplementedError('Implement me')
+
+    def train(self, state, target):
+        raise NotImplementedError('Implement me')
+
+    def update_target_model(self):
+        raise NotImplementedError('Implement me')
+
+
+class Memory:
+    def store(self, state, action, reward, next_state, done):
+        raise NotImplementedError('Implement me')
+
+    def sample(self, n):
+        raise NotImplementedError('Implement me')
+
+
+class NumpyRingBufferMemory(Memory):
+    def __init__(self, size, state_size: int):
+        self.memory = RingBuffer(size, dtype=[('state', np.float, state_size),
+                                              ('action', np.int),
+                                              ('reward', np.float),
+                                              ('next_state', np.float, state_size),
+                                              ('done', np.bool)])
+
+    def store(self, state, action, reward, next_state, done):
+        self.memory.append((state, action, reward, next_state, done))
+
+    def sample(self, n) -> np.ndarray:
+        return self.memory[np.random.choice(self.memory.shape[0], n, replace=False)]
+
+    def __len__(self):
+        return len(self.memory)
+
+    def __str__(self):
+        return str(self.memory)
+
+    def __repr__(self):
+        return repr(self.memory)
