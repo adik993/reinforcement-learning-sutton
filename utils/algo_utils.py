@@ -2,6 +2,7 @@ import itertools
 from collections import deque
 from math import ceil
 
+import time
 from gym import Env
 
 from features.TileCoding import tiles
@@ -62,7 +63,7 @@ class EpisodeAlgorithm:
         raise NotImplementedError()
 
 
-def generate_episode(env: Env, algorithm: Algorithm, render=False, print_step=False):
+def generate_episode(env: Env, algorithm: Algorithm, render=False, print_step=False, delay=0):
     done = False
     obs = env.reset()
     counter = 0
@@ -76,6 +77,8 @@ def generate_episode(env: Env, algorithm: Algorithm, render=False, print_step=Fa
         obs, reward, done, _ = env.step(action)
         algorithm.on_new_state(prev_obs, action, reward, obs, done)
         counter += 1
+        if delay > 0:
+            time.sleep(delay)
     algorithm.on_episode_done(counter)
     return counter
 
