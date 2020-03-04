@@ -1,6 +1,7 @@
 import sys
 from multiprocessing import Process, Queue, Event
-from threading import Thread
+from threading import Thread, RLock
+from time import clock
 
 import gym
 import keras.backend as K
@@ -40,7 +41,8 @@ class A3CModel:
 
 
 class PolicyGradientModel(A3CModel):
-    def __init__(self, state_size, action_size, alpha, alpha_decay, gamma, n, c_v, c_e, load_from_file=None):
+    def __init__(self, state_size, action_size, alpha, alpha_decay, gamma, n, c_v, c_e, clip_epsilon, n_epochs,
+                 load_from_file=None):
         self.state_size = state_size
         self.action_size = action_size
         self.alpha = alpha
@@ -48,6 +50,9 @@ class PolicyGradientModel(A3CModel):
         self.gamma_n = gamma ** n
         self.c_v = c_v
         self.c_e = c_e
+        self.clip_epsilon = clip_epsilon
+        self.n_epochs = n_epochs
+        self.lock = RLock()
         self.session = tf.Session()
         K.set_session(self.session)
         K.manual_variable_initialization(True)
@@ -56,6 +61,7 @@ class PolicyGradientModel(A3CModel):
         self.session.run(tf.global_variables_initializer())
         self.default_graph = tf.get_default_graph()
         self.default_graph.finalize()
+        self.t = 0
 
     def _build_model(self, load_from_file):
         input_layer = Input(batch_shape=(None, self.state_size))
@@ -75,37 +81,51 @@ class PolicyGradientModel(A3CModel):
         reward = tf.placeholder(tf.float32, [None, 1], name='reward')
         next_state = tf.placeholder(tf.float32, [None, self.state_size], name='next_state')
         done = tf.placeholder(tf.float32, [None, 1], name='done')
+        old_policy = tf.placeholder(tf.float32, [None, self.action_size], name='old_policy')
         policy, value = self.model(state)
         _, next_value = self.model(next_state)
         one_hot_action = tf.reshape(tf.one_hot(action, self.action_size), [-1, self.action_size], name='one_hot_action')
         advantage = reward + self.gamma_n * next_value * done - value
-        policy_log = tf.log(tf.reduce_sum(policy * one_hot_action, axis=1, keep_dims=True) + 1e-10, name='policy_log')
-        loss_policy = -policy_log * tf.stop_gradient(advantage, name='advantage')
+        policy_ratio = tf.divide(tf.reduce_sum(policy * one_hot_action, axis=1, keep_dims=True),
+                                 tf.reduce_sum(old_policy * one_hot_action, axis=1, keep_dims=True) + 1e-10,
+                                 name='probability_ratio')
+        # policy_log = tf.log(tf.reduce_sum(policy * one_hot_action, axis=1, keep_dims=True) + 1e-10, name='policy_log')
+        # old_policy_log = tf.log(tf.reduce_sum(old_policy * one_hot_action, axis=1, keep_dims=True) + 1e-10,
+        #                         name='policy_log')
+        # policy_ratio = tf.exp(policy_log - old_policy_log)
+        loss_policy = -tf.minimum(advantage * policy_ratio,
+                                  advantage * tf.clip_by_value(policy_ratio,
+                                                               1 - self.clip_epsilon,
+                                                               1 + self.clip_epsilon),
+                                  name='policy_loss')
         loss_value = tf.square(advantage, name='value_loss')
         entropy = tf.reduce_sum(policy * tf.log(policy + 1e-10), axis=1, keep_dims=True, name='entropy')
         loss = tf.reduce_mean(loss_policy + self.c_v * loss_value + self.c_e * entropy, name='total_loss')
-        optimizer = tf.train.RMSPropOptimizer(self.alpha, self.alpha_decay)
+        optimizer = tf.train.AdamOptimizer(self.alpha)
         minimize = optimizer.minimize(loss, name='loss_minimize')
-        return state, action, reward, next_state, done, minimize
+        return state, action, reward, next_state, done, old_policy, minimize
 
     def predict(self, state, target=False):
-        with self.default_graph.as_default():
+        with self.lock, self.default_graph.as_default():
             return self.model.predict(state)
 
     def train(self, state, action, reward, next_state, done):
-        with self.default_graph.as_default():
-            state_ph, action_ph, reward_ph, next_state_ph, done_ph, minimize = self.graph
-            self.session.run(minimize, feed_dict={
-                state_ph: state,
-                action_ph: action,
-                reward_ph: reward,
-                next_state_ph: next_state,
-                done_ph: done
-            })
-            # self.t += 1
-            # if self.t % 100 == 0:
-            #     _, v = self.predict(np.array([[-0.01335408, -0.04600273, -0.00677248, 0.01517507]]))
-            #     print('Value:', v.flatten()[0])
+        with self.lock, self.default_graph.as_default():
+            state_ph, action_ph, reward_ph, next_state_ph, done_ph, old_policy_ph, minimize = self.graph
+            old_policy, _ = self.predict(state)
+            for i in range(self.n_epochs):
+                self.session.run(minimize, feed_dict={
+                    state_ph: state,
+                    action_ph: action,
+                    reward_ph: reward,
+                    next_state_ph: next_state,
+                    done_ph: done,
+                    old_policy_ph: old_policy
+                })
+            self.t += 1
+            if self.t % 100 == 0:
+                _, v = self.predict(np.array([[-0.01335408, -0.04600273, -0.00677248, 0.01517507]]))
+                print('Value:', v.flatten()[0])
 
 
 class ModelProxy(A3CModel):
@@ -269,7 +289,8 @@ class Trainer(InterruptableThread):
 
 class Server(InterruptableProcess):
     def __init__(self, env_name, state_size, action_size, n_agents, n_predictors, n_trainers, batch_size, n_episodes,
-                 alpha, alpha_decay, gamma, c_v, c_e, n, epsilon_min, epsilon_max, epsilon_lam, step_delay=0.001):
+                 alpha, alpha_decay, gamma, c_v, c_e, clip_epsilon, n_epochs, n, epsilon_min, epsilon_max, epsilon_lam,
+                 step_delay=0.001):
         super().__init__()
         self.env_name = env_name
         self.state_size = state_size
@@ -284,6 +305,8 @@ class Server(InterruptableProcess):
         self.gamma = gamma
         self.c_v = c_v
         self.c_e = c_e
+        self.clip_epsilon = clip_epsilon
+        self.n_epochs = n_epochs
         self.n = n
         self.epsilon_min = epsilon_min
         self.epsilon_max = epsilon_max
@@ -345,9 +368,10 @@ class Server(InterruptableProcess):
 
     def run(self):
         print('[{}] Server started'.format(self.pid))
+        start_time = clock()
         episodes_done = 0
         model = PolicyGradientModel(self.state_size, self.action_size, self.alpha, self.alpha_decay, self.gamma, self.n,
-                                    self.c_v, self.c_e)
+                                    self.c_v, self.c_e, self.clip_epsilon, self.n_epochs)
         self._init_trainers(model)
         self._init_predictors(model)
         self._init_agents()
@@ -356,22 +380,22 @@ class Server(InterruptableProcess):
             steps = self.episode_queue.get()
             episodes_done += 1
             if episodes_done % 100 == 0:
-                print('Episodes done: {:4}, steps: {:3}'.format(episodes_done, steps))
+                print('Episodes done: {:4}, steps: {:3}, time: {}s'.format(episodes_done, steps, clock() - start_time))
             if episodes_done >= self.n_episodes:
                 self.interrupt()
-            if steps >= 500:
-                win_steps_in_row += 1
-            else:
-                win_steps_in_row = 0
-            if win_steps_in_row >= 3 * self.n_agents:
-                # self._save_model(model.model)
-                self.interrupt()
+            # if steps >= 500:
+            #     win_steps_in_row += 1
+            # else:
+            #     win_steps_in_row = 0
+            # if win_steps_in_row >= 3 * self.n_agents:
+            #     # self._save_model(model.model)
+            #     self.interrupt()
         self._interrupt_agents()
         self._interrupt_predictors()
         self._interrupt_trainers()
         self._perform_plays(model)
         # self.episode_queue.close()
-        print('[{}] Server stopped'.format(self.pid))
+        print('[{}] Server stopped({}s)'.format(self.pid, clock() - start_time))
 
     def _perform_plays(self, model):
         K.set_learning_phase(0)
@@ -393,17 +417,8 @@ if __name__ == '__main__':
     environment_id = 'CartPole-v1'
     state_space_size, action_space_size = extract_space_sizes(environment_id)
     server = Server(environment_id, state_space_size, action_space_size,
-                    n_agents=16, n_predictors=4, n_trainers=1, batch_size=32, n_episodes=10000,
-                    alpha=0.005, alpha_decay=0.99, gamma=0.99, c_v=0.5, c_e=0.01,
-                    n=8, epsilon_max=0.4, epsilon_min=0.01, epsilon_lam=0.001, step_delay=0)
+                    n_agents=16, n_predictors=4, n_trainers=1, batch_size=4000, n_episodes=10000,
+                    alpha=1e-2, alpha_decay=0.99, gamma=0.99, c_v=0.5, c_e=0.01, clip_epsilon=0.2,
+                    n_epochs=5, n=8, epsilon_max=0.4, epsilon_min=0.01, epsilon_lam=0.001, step_delay=0)
     server.start()
     server.join()
-    if isfile('cartpole_a3c.h5'):
-        K.set_learning_phase(0)
-        m = PolicyGradientModel(state_space_size, action_space_size, 0, 0, 0, 0, 0, 0,
-                                load_from_file='cartpole_a3c.h5')
-        agent = Agent(state_space_size, action_space_size, m, 8, 0.99, EpsilonDecay(0.4, 0.01, 0.001), train=False)
-        env = gym.make(environment_id)
-        while True:
-            steps = generate_episode(env, agent, render=True)
-            print('Steps:', steps)
